@@ -11,7 +11,7 @@ import { formatCurrency } from '@/lib/api';
 import { AddIngredientDialog } from '@/components/dialogs/AddIngredientDialog';
 
 export default function IngredientsPage() {
-  const { pb, isAuthenticated } = useAuth();
+  const { pb, isAuthenticated, isViewOnlyRole } = useAuth();
   const [ingredients, setIngredients] = useState<Ingredient[]>([]);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [loading, setLoading] = useState(true);
@@ -59,6 +59,10 @@ export default function IngredientsPage() {
 
   const handleDelete = async (id: string) => {
     if (!pb) return;
+    if (isViewOnlyRole) {
+      toast.error('Role Anda hanya dapat melihat data dan tidak bisa menghapus bahan baku');
+      return;
+    }
 
     if (!confirm('Yakin ingin menghapus bahan baku ini?')) return;
 
@@ -88,7 +92,7 @@ export default function IngredientsPage() {
             </div>
           </div>
           <div>
-            {pb && (
+            {pb && !isViewOnlyRole && (
               <AddIngredientDialog
                 pb={pb}
                 suppliers={suppliers}
@@ -178,15 +182,19 @@ export default function IngredientsPage() {
                           </span>
                         </td>
                         <td className="px-6 py-4 flex justify-end gap-2">
-                          <button className="p-2 hover:bg-slate-800 rounded-lg text-slate-400 hover:text-slate-200 transition-colors">
-                            <Edit2 size={16} />
-                          </button>
-                          <button
-                            onClick={() => handleDelete(ingredient.id)}
-                            className="p-2 hover:bg-red-500/10 rounded-lg text-slate-400 hover:text-red-400 transition-colors"
-                          >
-                            <Trash2 size={16} />
-                          </button>
+                          {!isViewOnlyRole && (
+                            <>
+                              <button className="p-2 hover:bg-slate-800 rounded-lg text-slate-400 hover:text-slate-200 transition-colors">
+                                <Edit2 size={16} />
+                              </button>
+                              <button
+                                onClick={() => handleDelete(ingredient.id)}
+                                className="p-2 hover:bg-red-500/10 rounded-lg text-slate-400 hover:text-red-400 transition-colors"
+                              >
+                                <Trash2 size={16} />
+                              </button>
+                            </>
+                          )}
                         </td>
                       </tr>
                     );

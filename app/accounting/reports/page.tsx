@@ -17,7 +17,7 @@ interface SummaryRow {
 }
 
 export default function AccountingReportsPage() {
-  const { pb, isAuthenticated } = useAuth();
+  const { pb, isAuthenticated, isViewOnlyRole } = useAuth();
   const [loading, setLoading] = useState(true);
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [payments, setPayments] = useState<Payment[]>([]);

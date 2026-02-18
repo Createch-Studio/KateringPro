@@ -10,7 +10,7 @@ import { formatCurrency, formatDateTime, getPocketBaseErrorMessage } from '@/lib
 import { toast } from 'sonner';
 
 export default function CashRegisterPage() {
-  const { pb, user, isAuthenticated } = useAuth();
+  const { pb, user, isAuthenticated, isViewOnlyRole } = useAuth();
   const [session, setSession] = useState<CashRegisterSession | null>(null);
   const [loading, setLoading] = useState(true);
   const [openingBalance, setOpeningBalance] = useState<number>(0);
@@ -48,6 +48,10 @@ export default function CashRegisterPage() {
   }, [pb, user, isAuthenticated]);
 
   const handleOpen = async () => {
+    if (isViewOnlyRole) {
+      toast.error('Role Anda hanya dapat melihat data dan tidak bisa membuka cash register');
+      return;
+    }
     if (!pb || !user) return;
     if (openingBalance < 0) {
       toast.error('Saldo awal tidak boleh negatif');
@@ -76,6 +80,10 @@ export default function CashRegisterPage() {
   };
 
   const handleClose = async () => {
+    if (isViewOnlyRole) {
+      toast.error('Role Anda hanya dapat melihat data dan tidak bisa menutup cash register');
+      return;
+    }
     if (!pb || !session) return;
     if (closingBalance < 0) {
       toast.error('Saldo akhir tidak boleh negatif');

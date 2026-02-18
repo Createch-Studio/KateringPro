@@ -10,7 +10,7 @@ import { toast } from 'sonner';
 import { AddSupplierDialog } from '@/components/dialogs/AddSupplierDialog';
 
 export default function SuppliersPage() {
-  const { pb, isAuthenticated } = useAuth();
+  const { pb, isAuthenticated, isViewOnlyRole } = useAuth();
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
@@ -51,6 +51,10 @@ export default function SuppliersPage() {
 
   const handleDelete = async (id: string) => {
     if (!pb) return;
+    if (isViewOnlyRole) {
+      toast.error('Role Anda hanya dapat melihat data dan tidak bisa menghapus supplier');
+      return;
+    }
 
     if (!confirm('Yakin ingin menghapus supplier ini?')) return;
 
@@ -80,7 +84,9 @@ export default function SuppliersPage() {
             </div>
           </div>
           <div className="ml-4">
-            {pb && <AddSupplierDialog pb={pb} onSupplierAdded={handleSupplierAdded} />}
+            {pb && !isViewOnlyRole && (
+              <AddSupplierDialog pb={pb} onSupplierAdded={handleSupplierAdded} />
+            )}
           </div>
         </div>
 
@@ -146,15 +152,19 @@ export default function SuppliersPage() {
                         </span>
                       </td>
                       <td className="px-6 py-4 flex justify-end gap-2">
-                        <button className="p-2 hover:bg-slate-800 rounded-lg text-slate-400 hover:text-slate-200 transition-colors">
-                          <Edit2 size={16} />
-                        </button>
-                        <button
-                          onClick={() => handleDelete(supplier.id)}
-                          className="p-2 hover:bg-red-500/10 rounded-lg text-slate-400 hover:text-red-400 transition-colors"
-                        >
-                          <Trash2 size={16} />
-                        </button>
+                        {!isViewOnlyRole && (
+                          <>
+                            <button className="p-2 hover:bg-slate-800 rounded-lg text-slate-400 hover:text-slate-200 transition-colors">
+                              <Edit2 size={16} />
+                            </button>
+                            <button
+                              onClick={() => handleDelete(supplier.id)}
+                              className="p-2 hover:bg-red-500/10 rounded-lg text-slate-400 hover:text-red-400 transition-colors"
+                            >
+                              <Trash2 size={16} />
+                            </button>
+                          </>
+                        )}
                       </td>
                     </tr>
                   ))}

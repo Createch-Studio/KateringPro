@@ -19,7 +19,7 @@ import { Customer, Invoice, Order } from '@/lib/types';
 import { AddInvoiceDialog } from '@/components/dialogs/AddInvoiceDialog';
 
 export default function InvoicesPage() {
-  const { pb, isAuthenticated } = useAuth();
+  const { pb, isAuthenticated, isViewOnlyRole } = useAuth();
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
@@ -98,6 +98,10 @@ export default function InvoicesPage() {
 
   const handleDelete = async (id: string) => {
     if (!pb) return;
+    if (isViewOnlyRole) {
+      toast.error('Role Anda hanya dapat melihat data dan tidak bisa menghapus invoice');
+      return;
+    }
 
     if (!confirm('Yakin ingin menghapus invoice ini?')) return;
 
@@ -134,6 +138,10 @@ export default function InvoicesPage() {
   };
 
   const handleOpenEdit = (invoice: Invoice) => {
+    if (isViewOnlyRole) {
+      toast.error('Role Anda hanya dapat melihat data dan tidak bisa mengubah invoice');
+      return;
+    }
     setSelectedInvoice(invoice);
     const baseAmount = invoice.amount || 0;
     const baseTax = invoice.tax_amount || 0;
@@ -157,6 +165,10 @@ export default function InvoicesPage() {
   const handleSaveEdit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!pb || !selectedInvoice) return;
+    if (isViewOnlyRole) {
+      toast.error('Role Anda hanya dapat melihat data dan tidak bisa mengubah invoice');
+      return;
+    }
     if (!editForm.invoice_date) {
       toast.error('Tanggal invoice wajib diisi');
       return;

@@ -11,7 +11,7 @@ import { Expense } from '@/lib/types';
 import { AddExpenseDialog } from '@/components/dialogs/AddExpenseDialog';
 
 export default function ExpensesPage() {
-  const { pb, isAuthenticated } = useAuth();
+  const { pb, isAuthenticated, isViewOnlyRole } = useAuth();
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
@@ -56,6 +56,10 @@ export default function ExpensesPage() {
 
   const handleDelete = async (id: string) => {
     if (!pb) return;
+    if (isViewOnlyRole) {
+      toast.error('Role Anda hanya dapat melihat data dan tidak bisa menghapus pengeluaran');
+      return;
+    }
 
     if (!confirm('Yakin ingin menghapus pengeluaran ini?')) return;
 
@@ -102,7 +106,9 @@ export default function ExpensesPage() {
             </div>
           </div>
           <div className="ml-4">
-            {pb && <AddExpenseDialog pb={pb} onExpenseAdded={handleExpenseAdded} />}
+            {pb && !isViewOnlyRole && (
+              <AddExpenseDialog pb={pb} onExpenseAdded={handleExpenseAdded} />
+            )}
           </div>
         </div>
 
@@ -152,15 +158,19 @@ export default function ExpensesPage() {
                         {formatCurrency(expense.amount)}
                       </td>
                       <td className="px-6 py-4 flex justify-end gap-2">
-                        <button className="p-2 hover:bg-slate-800 rounded-lg text-slate-400 hover:text-slate-200 transition-colors">
-                          <Edit2 size={16} />
-                        </button>
-                        <button
-                          onClick={() => handleDelete(expense.id)}
-                          className="p-2 hover:bg-red-500/10 rounded-lg text-slate-400 hover:text-red-400 transition-colors"
-                        >
-                          <Trash2 size={16} />
-                        </button>
+                        {!isViewOnlyRole && (
+                          <>
+                            <button className="p-2 hover:bg-slate-800 rounded-lg text-slate-400 hover:text-slate-200 transition-colors">
+                              <Edit2 size={16} />
+                            </button>
+                            <button
+                              onClick={() => handleDelete(expense.id)}
+                              className="p-2 hover:bg-red-500/10 rounded-lg text-slate-400 hover:text-red-400 transition-colors"
+                            >
+                              <Trash2 size={16} />
+                            </button>
+                          </>
+                        )}
                       </td>
                     </tr>
                   ))}

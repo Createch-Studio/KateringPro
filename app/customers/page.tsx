@@ -11,7 +11,7 @@ import { AddCustomerDialog } from '@/components/dialogs/AddCustomerDialog';
 import { getPocketBaseErrorMessage } from '@/lib/api';
 
 export default function CustomersPage() {
-  const { pb, isAuthenticated } = useAuth();
+  const { pb, isAuthenticated, isViewOnlyRole } = useAuth();
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
@@ -48,6 +48,10 @@ export default function CustomersPage() {
 
   const handleDelete = async (id: string) => {
     if (!pb) return;
+    if (isViewOnlyRole) {
+      toast.error('Role Anda hanya dapat melihat data dan tidak bisa menghapus pelanggan');
+      return;
+    }
 
     if (!confirm('Yakin ingin menghapus pelanggan ini?')) return;
 
@@ -81,7 +85,9 @@ export default function CustomersPage() {
             </div>
           </div>
           <div className="ml-4">
-            {pb && <AddCustomerDialog pb={pb} onCustomerAdded={handleCustomerAdded} />}
+            {pb && !isViewOnlyRole && (
+              <AddCustomerDialog pb={pb} onCustomerAdded={handleCustomerAdded} />
+            )}
           </div>
         </div>
 
@@ -132,15 +138,19 @@ export default function CustomersPage() {
                       <td className="px-6 py-4 text-slate-300">{customer.phone}</td>
                       <td className="px-6 py-4 text-slate-300">{customer.email || '-'}</td>
                       <td className="px-6 py-4 flex justify-end gap-2">
-                        <button className="p-2 hover:bg-slate-800 rounded-lg text-slate-400 hover:text-slate-200 transition-colors">
-                          <Edit2 size={16} />
-                        </button>
-                        <button
-                          onClick={() => handleDelete(customer.id)}
-                          className="p-2 hover:bg-red-500/10 rounded-lg text-slate-400 hover:text-red-400 transition-colors"
-                        >
-                          <Trash2 size={16} />
-                        </button>
+                        {!isViewOnlyRole && (
+                          <>
+                            <button className="p-2 hover:bg-slate-800 rounded-lg text-slate-400 hover:text-slate-200 transition-colors">
+                              <Edit2 size={16} />
+                            </button>
+                            <button
+                              onClick={() => handleDelete(customer.id)}
+                              className="p-2 hover:bg-red-500/10 rounded-lg text-slate-400 hover:text-red-400 transition-colors"
+                            >
+                              <Trash2 size={16} />
+                            </button>
+                          </>
+                        )}
                       </td>
                     </tr>
                   ))}

@@ -31,7 +31,7 @@ const normalBalances: { value: Account['normal_balance']; label: string }[] = [
 ];
 
 export default function ChartOfAccountsPage() {
-  const { pb, isAuthenticated } = useAuth();
+  const { pb, isAuthenticated, isViewOnlyRole } = useAuth();
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
@@ -100,11 +100,19 @@ export default function ChartOfAccountsPage() {
   };
 
   const handleOpenAdd = () => {
+    if (isViewOnlyRole) {
+      toast.error('Role Anda hanya dapat melihat data dan tidak bisa menambah akun');
+      return;
+    }
     resetForm();
     setAddOpen(true);
   };
 
   const handleOpenEdit = (account: Account) => {
+    if (isViewOnlyRole) {
+      toast.error('Role Anda hanya dapat melihat data dan tidak bisa mengubah akun');
+      return;
+    }
     setSelectedAccount(account);
     setFormData({
       code: account.code,
@@ -120,6 +128,10 @@ export default function ChartOfAccountsPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!pb) return;
+    if (isViewOnlyRole) {
+      toast.error('Role Anda hanya dapat melihat data dan tidak bisa mengubah akun');
+      return;
+    }
     if (!formData.code.trim() || !formData.name.trim()) {
       toast.error('Kode dan nama akun wajib diisi');
       return;
@@ -165,6 +177,10 @@ export default function ChartOfAccountsPage() {
 
   const handleDelete = async (account: Account) => {
     if (!pb) return;
+    if (isViewOnlyRole) {
+      toast.error('Role Anda hanya dapat melihat data dan tidak bisa menghapus akun');
+      return;
+    }
     if (!confirm(`Yakin ingin menghapus akun ${account.code} - ${account.name}?`)) return;
 
     try {
@@ -202,6 +218,7 @@ export default function ChartOfAccountsPage() {
               type="button"
               onClick={handleOpenAdd}
               className="bg-orange-500 hover:bg-orange-600 text-white"
+              disabled={isViewOnlyRole}
             >
               <Plus className="w-4 h-4 mr-2" />
               Tambah Akun
@@ -273,20 +290,24 @@ export default function ChartOfAccountsPage() {
                         </span>
                       </td>
                       <td className="px-6 py-3 text-sm flex justify-end gap-2">
-                        <button
-                          type="button"
-                          onClick={() => handleOpenEdit(account)}
-                          className="p-2 hover:bg-slate-800 rounded-lg text-slate-400 hover:text-slate-200 transition-colors"
-                        >
-                          <Edit2 className="w-4 h-4" />
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => handleDelete(account)}
-                          className="p-2 hover:bg-red-500/10 rounded-lg text-slate-400 hover:text-red-400 transition-colors"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
+                        {!isViewOnlyRole && (
+                          <>
+                            <button
+                              type="button"
+                              onClick={() => handleOpenEdit(account)}
+                              className="p-2 hover:bg-slate-800 rounded-lg text-slate-400 hover:text-slate-200 transition-colors"
+                            >
+                              <Edit2 className="w-4 h-4" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleDelete(account)}
+                              className="p-2 hover:bg-red-500/10 rounded-lg text-slate-400 hover:text-red-400 transition-colors"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </>
+                        )}
                       </td>
                     </tr>
                   ))}

@@ -18,7 +18,7 @@ import {
 import { Calendar, Edit2, Loader2, Plus, Search, Trash2 } from 'lucide-react';
 
 export default function JournalPage() {
-  const { pb, isAuthenticated } = useAuth();
+  const { pb, isAuthenticated, isViewOnlyRole } = useAuth();
   const [entries, setEntries] = useState<JournalEntry[]>([]);
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [loading, setLoading] = useState(true);
@@ -107,11 +107,19 @@ export default function JournalPage() {
   };
 
   const handleOpenAdd = () => {
+    if (isViewOnlyRole) {
+      toast.error('Role Anda hanya dapat melihat data dan tidak bisa menambah entri jurnal');
+      return;
+    }
     resetForm();
     setDialogOpen(true);
   };
 
   const handleOpenEdit = (entry: JournalEntry) => {
+    if (isViewOnlyRole) {
+      toast.error('Role Anda hanya dapat melihat data dan tidak bisa mengubah entri jurnal');
+      return;
+    }
     setSelectedEntry(entry);
     setFormData({
       entry_date: entry.entry_date.includes('T')
@@ -130,6 +138,10 @@ export default function JournalPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!pb) return;
+    if (isViewOnlyRole) {
+      toast.error('Role Anda hanya dapat melihat data dan tidak bisa mengubah entri jurnal');
+      return;
+    }
 
     if (!formData.entry_date || !formData.account_id) {
       toast.error('Tanggal dan akun wajib diisi');
@@ -198,6 +210,10 @@ export default function JournalPage() {
 
   const handleDelete = async (entry: JournalEntry) => {
     if (!pb) return;
+    if (isViewOnlyRole) {
+      toast.error('Role Anda hanya dapat melihat data dan tidak bisa menghapus entri jurnal');
+      return;
+    }
     if (
       !confirm(
         `Yakin ingin menghapus entri jurnal untuk akun ini? (Ref: ${
@@ -248,6 +264,7 @@ export default function JournalPage() {
               type="button"
               onClick={handleOpenAdd}
               className="bg-orange-500 hover:bg-orange-600 text-white"
+              disabled={isViewOnlyRole}
             >
               <Plus className="w-4 h-4 mr-2" />
               Tambah Entri
@@ -329,20 +346,24 @@ export default function JournalPage() {
                           : '-'}
                       </td>
                       <td className="px-6 py-3 text-sm flex justify-end gap-2">
-                        <button
-                          type="button"
-                          onClick={() => handleOpenEdit(entry)}
-                          className="p-2 hover:bg-slate-800 rounded-lg text-slate-400 hover:text-slate-200 transition-colors"
-                        >
-                          <Edit2 className="w-4 h-4" />
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => handleDelete(entry)}
-                          className="p-2 hover:bg-red-500/10 rounded-lg text-slate-400 hover:text-red-400 transition-colors"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
+                        {!isViewOnlyRole && (
+                          <>
+                            <button
+                              type="button"
+                              onClick={() => handleOpenEdit(entry)}
+                              className="p-2 hover:bg-slate-800 rounded-lg text-slate-400 hover:text-slate-200 transition-colors"
+                            >
+                              <Edit2 className="w-4 h-4" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleDelete(entry)}
+                              className="p-2 hover:bg-red-500/10 rounded-lg text-slate-400 hover:text-red-400 transition-colors"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </>
+                        )}
                       </td>
                     </tr>
                   ))}

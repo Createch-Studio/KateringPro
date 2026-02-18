@@ -19,7 +19,7 @@ import { toast } from 'sonner';
 import { formatCurrency, formatDate, getPocketBaseErrorMessage } from '@/lib/api';
 
 export default function PaymentsPage() {
-  const { pb, isAuthenticated } = useAuth();
+  const { pb, isAuthenticated, isViewOnlyRole } = useAuth();
   const [payments, setPayments] = useState<Payment[]>([]);
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [orders, setOrders] = useState<Order[]>([]);
@@ -228,6 +228,11 @@ export default function PaymentsPage() {
   };
 
   const handleOpenChange = (open: boolean) => {
+    if (open && isViewOnlyRole) {
+      toast.error('Role Anda hanya dapat melihat data dan tidak bisa menambah pembayaran');
+      setAddOpen(false);
+      return;
+    }
     setAddOpen(open);
     if (!open) return;
     setFormData((prev) => ({
@@ -239,6 +244,10 @@ export default function PaymentsPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!pb) return;
+    if (isViewOnlyRole) {
+      toast.error('Role Anda hanya dapat melihat data dan tidak bisa menambah pembayaran');
+      return;
+    }
 
     if (!formData.invoice_id && !formData.order_id) {
       toast.error('Pilih minimal satu: invoice atau order');
@@ -300,6 +309,10 @@ export default function PaymentsPage() {
   };
 
   const handleOpenEditPayment = (payment: Payment) => {
+    if (isViewOnlyRole) {
+      toast.error('Role Anda hanya dapat melihat data dan tidak bisa mengubah pembayaran');
+      return;
+    }
     setSelectedPayment(payment);
     setEditForm({
       payment_date: getDateOnly(payment.payment_date),
@@ -317,6 +330,10 @@ export default function PaymentsPage() {
 
   const handleDeletePayment = async (payment: Payment) => {
     if (!pb) return;
+    if (isViewOnlyRole) {
+      toast.error('Role Anda hanya dapat melihat data dan tidak bisa menghapus pembayaran');
+      return;
+    }
     if (!confirm('Yakin ingin menghapus pembayaran ini?')) return;
 
     try {
@@ -334,6 +351,10 @@ export default function PaymentsPage() {
   const handleSaveEditPayment = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!pb || !selectedPayment) return;
+    if (isViewOnlyRole) {
+      toast.error('Role Anda hanya dapat melihat data dan tidak bisa mengubah pembayaran');
+      return;
+    }
 
     if (!editForm.invoice_id && !editForm.order_id) {
       toast.error('Pilih minimal satu: invoice atau order');
@@ -411,7 +432,10 @@ export default function PaymentsPage() {
           <div>
             <Dialog open={addOpen} onOpenChange={handleOpenChange}>
               <DialogTrigger asChild>
-                <Button className="gap-2 bg-orange-500 hover:bg-orange-600 text-white">
+                <Button
+                  className="gap-2 bg-orange-500 hover:bg-orange-600 text-white"
+                  disabled={isViewOnlyRole}
+                >
                   <Plus size={16} />
                   Tambah Pembayaran
                 </Button>

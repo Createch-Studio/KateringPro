@@ -1,5 +1,5 @@
 import PocketBase, { ClientResponseError } from 'pocketbase';
-import { Account, Invoice, JournalEntry } from './types';
+import { Account, Employee, Invoice, JournalEntry } from './types';
 
 export async function fetchWithError<T>(
   fn: () => Promise<T>,
@@ -142,6 +142,48 @@ export const paymentTypes = [
   { value: 'installment', label: 'Installment' },
   { value: 'full_payment', label: 'Full Payment' },
   { value: 'refund', label: 'Refund' },
+];
+
+export const employeeRoles: Array<{
+  value: Employee['role'];
+  label: string;
+  description: string;
+}> = [
+  {
+    value: 'admin',
+    label: 'Admin',
+    description: 'Akses penuh semua modul dan pengaturan.',
+  },
+  {
+    value: 'manager',
+    label: 'Manager',
+    description: 'Pantau laporan, pesanan, dan keuangan.',
+  },
+  {
+    value: 'cashier',
+    label: 'Kasir',
+    description: 'Kelola transaksi PoS dan pembayaran.',
+  },
+  {
+    value: 'production',
+    label: 'Produksi',
+    description: 'Fokus pada tugas produksi dan pesanan.',
+  },
+  {
+    value: 'accounting',
+    label: 'Akuntansi',
+    description: 'Kelola jurnal, laporan, dan rekonsiliasi.',
+  },
+  {
+    value: 'waiter',
+    label: 'Waiter',
+    description: 'Hanya akses lihat pesanan terkait, tanpa izin ubah data.',
+  },
+  {
+    value: 'driver',
+    label: 'Driver',
+    description: 'Hanya akses lihat pengantaran dan pesanan, tanpa izin ubah data.',
+  },
 ];
 
 export const menuUnits = [

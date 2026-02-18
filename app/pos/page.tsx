@@ -17,7 +17,7 @@ interface CartItem {
 }
 
 export default function PosPage() {
-  const { pb, isAuthenticated, user } = useAuth();
+  const { pb, isAuthenticated, user, isViewOnlyRole } = useAuth();
   const [menus, setMenus] = useState<MenuItem[]>([]);
   const [menusLoading, setMenusLoading] = useState(true);
   const [search, setSearch] = useState('');
@@ -85,6 +85,10 @@ export default function PosPage() {
   }, [menus, search]);
 
   const addToCart = (menu: MenuItem) => {
+    if (isViewOnlyRole) {
+      toast.error('Role Anda hanya dapat melihat data dan tidak bisa melakukan transaksi PoS');
+      return;
+    }
     setCartItems((prev) => {
       const existing = prev.find((item) => item.menu.id === menu.id);
       if (existing) {
@@ -104,6 +108,10 @@ export default function PosPage() {
   };
 
   const updateQuantity = (id: string, delta: number) => {
+    if (isViewOnlyRole) {
+      toast.error('Role Anda hanya dapat melihat data dan tidak bisa mengubah keranjang');
+      return;
+    }
     setCartItems((prev) =>
       prev
         .map((item) =>
@@ -114,6 +122,10 @@ export default function PosPage() {
   };
 
   const removeFromCart = (id: string) => {
+    if (isViewOnlyRole) {
+      toast.error('Role Anda hanya dapat melihat data dan tidak bisa mengubah keranjang');
+      return;
+    }
     setCartItems((prev) => prev.filter((item) => item.id !== id));
   };
 
@@ -124,9 +136,13 @@ export default function PosPage() {
 
   const total = subtotal;
 
-  const canCheckout = !!registerSession && cartItems.length > 0 && !saving;
+  const canCheckout = !!registerSession && cartItems.length > 0 && !saving && !isViewOnlyRole;
 
   const handleCheckout = async () => {
+    if (isViewOnlyRole) {
+      toast.error('Role Anda hanya dapat melihat data dan tidak bisa melakukan transaksi PoS');
+      return;
+    }
     if (!pb || !isAuthenticated || !user) return;
     if (!registerSession) {
       toast.error('Cash register belum dibuka. Buka terlebih dahulu di menu Cash Register.');

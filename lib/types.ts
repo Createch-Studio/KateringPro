@@ -163,6 +163,28 @@ export interface User extends BaseRecord {
   emailVisibility?: boolean;
 }
 
+// Employees
+export interface Employee extends BaseRecord {
+  name: string;
+  email: string;
+  phone?: string;
+  position?: string;
+  role:
+    | 'admin'
+    | 'manager'
+    | 'cashier'
+    | 'production'
+    | 'accounting'
+    | 'waiter'
+    | 'driver';
+  status: 'active' | 'inactive';
+  user_id?: string;
+  base_salary?: number;
+  join_date?: string;
+  note?: string;
+  notes?: string;
+}
+
 // Dashboard Stats
 export interface DashboardStats {
   totalOrders: number;

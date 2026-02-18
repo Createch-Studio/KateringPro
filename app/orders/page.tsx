@@ -11,7 +11,7 @@ import { EditOrderDialog } from '@/components/dialogs/EditOrderDialog';
 import { Trash2 } from 'lucide-react';
 
 export default function OrdersPage() {
-  const { pb, isAuthenticated } = useAuth();
+  const { pb, isAuthenticated, isViewOnlyRole } = useAuth();
   const [orders, setOrders] = useState<Order[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [loading, setLoading] = useState(true);
@@ -71,6 +71,10 @@ export default function OrdersPage() {
 
   const handleDelete = async (id: string) => {
     if (!pb) return;
+    if (isViewOnlyRole) {
+      toast.error('Role Anda hanya dapat melihat data dan tidak bisa menghapus pesanan');
+      return;
+    }
 
     if (!confirm('Yakin ingin menghapus pesanan ini?')) return;
 
@@ -90,7 +94,9 @@ export default function OrdersPage() {
         <div className="flex items-center justify-between">
           <h2 className="text-xl font-semibold text-white">📋 Data Pesanan</h2>
           <div>
-            {pb && <AddOrderDialog pb={pb} customers={customers} onOrderAdded={handleOrderAdded} />}
+            {pb && !isViewOnlyRole && (
+              <AddOrderDialog pb={pb} customers={customers} onOrderAdded={handleOrderAdded} />
+            )}
           </div>
         </div>
 
@@ -140,25 +146,27 @@ export default function OrdersPage() {
                         {order.order_date || order.created ? formatDate(order.order_date || order.created) : '-'}
                       </td>
                       <td className="px-6 py-4 flex justify-end gap-2">
-                        {pb && (
-                          <EditOrderDialog
-                            pb={pb}
-                            order={order}
-                            customers={customers}
-                            onOrderUpdated={(updated) =>
-                              setOrders(
-                                orders.map((o) => (o.id === updated.id ? (updated as Order) : o))
-                              )
-                            }
-                          />
+                        {pb && !isViewOnlyRole && (
+                          <>
+                            <EditOrderDialog
+                              pb={pb}
+                              order={order}
+                              customers={customers}
+                              onOrderUpdated={(updated) =>
+                                setOrders(
+                                  orders.map((o) => (o.id === updated.id ? (updated as Order) : o))
+                                )
+                              }
+                            />
+                            <button
+                              type="button"
+                              onClick={() => handleDelete(order.id)}
+                              className="p-2 hover:bg-red-500/10 rounded-lg text-slate-400 hover:text-red-400 transition-colors"
+                            >
+                              <Trash2 size={16} />
+                            </button>
+                          </>
                         )}
-                        <button
-                          type="button"
-                          onClick={() => handleDelete(order.id)}
-                          className="p-2 hover:bg-red-500/10 rounded-lg text-slate-400 hover:text-red-400 transition-colors"
-                        >
-                          <Trash2 size={16} />
-                        </button>
                       </td>
                     </tr>
                   ))}

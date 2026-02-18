@@ -9,7 +9,7 @@ import { toast } from 'sonner';
 import { Ingredient } from '@/lib/types';
 
 export default function InventoryPage() {
-  const { pb, isAuthenticated } = useAuth();
+  const { pb, isAuthenticated, isViewOnlyRole } = useAuth();
   const [items, setItems] = useState<Ingredient[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
@@ -45,6 +45,10 @@ export default function InventoryPage() {
 
   const handleDelete = async (id: string) => {
     if (!pb) return;
+    if (isViewOnlyRole) {
+      toast.error('Role Anda hanya dapat melihat data dan tidak bisa menghapus item stok');
+      return;
+    }
 
     if (!confirm('Yakin ingin menghapus item stok ini?')) return;
 
@@ -140,15 +144,19 @@ export default function InventoryPage() {
                           </span>
                         </td>
                         <td className="px-6 py-4 flex justify-end gap-2">
-                          <button className="p-2 hover:bg-slate-800 rounded-lg text-slate-400 hover:text-slate-200 transition-colors">
-                            <Edit2 size={16} />
-                          </button>
-                          <button
-                            onClick={() => handleDelete(item.id)}
-                            className="p-2 hover:bg-red-500/10 rounded-lg text-slate-400 hover:text-red-400 transition-colors"
-                          >
-                            <Trash2 size={16} />
-                          </button>
+                          {!isViewOnlyRole && (
+                            <>
+                              <button className="p-2 hover:bg-slate-800 rounded-lg text-slate-400 hover:text-slate-200 transition-colors">
+                                <Edit2 size={16} />
+                              </button>
+                              <button
+                                onClick={() => handleDelete(item.id)}
+                                className="p-2 hover:bg-red-500/10 rounded-lg text-slate-400 hover:text-red-400 transition-colors"
+                              >
+                                <Trash2 size={16} />
+                              </button>
+                            </>
+                          )}
                         </td>
                       </tr>
                     );
