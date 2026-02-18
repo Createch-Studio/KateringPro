@@ -1,0 +1,270 @@
+'use client';
+
+import { useEffect, useMemo, useState } from 'react';
+import { MainLayout } from '@/components/layout/MainLayout';
+import { useAuth } from '@/lib/auth-context';
+import { formatCurrency } from '@/lib/api';
+import { Expense, Invoice, Payment } from '@/lib/types';
+import { Input } from '@/components/ui/input';
+import { Calendar, Loader2 } from 'lucide-react';
+
+type ReportRange = 'month' | 'quarter' | 'year' | 'custom';
+
+interface SummaryRow {
+  label: string;
+  value: number;
+}
+
+export default function AccountingReportsPage() {
+  const { pb, isAuthenticated } = useAuth();
+  const [loading, setLoading] = useState(true);
+  const [invoices, setInvoices] = useState<Invoice[]>([]);
+  const [payments, setPayments] = useState<Payment[]>([]);
+  const [expenses, setExpenses] = useState<Expense[]>([]);
+  const [range, setRange] = useState<ReportRange>('month');
+  const [startDate, setStartDate] = useState<string>('');
+  const [endDate, setEndDate] = useState<string>('');
+
+  useEffect(() => {
+    if (!pb || !isAuthenticated) {
+      setLoading(false);
+      return;
+    }
+
+    const fetchData = async () => {
+      try {
+        setLoading(true);
+
+        const [invoicesRes, paymentsRes, expensesRes] = await Promise.all([
+          pb.collection('invoices').getList(1, 200, {
+            sort: '-invoice_date',
+          }),
+          pb.collection('payments').getList(1, 200, {
+            sort: '-payment_date',
+          }),
+          pb.collection('expenses').getList(1, 200, {
+            sort: '-expense_date',
+            filter: 'is_deleted = false || is_deleted = ""',
+          }),
+        ]);
+
+        setInvoices(invoicesRes.items as Invoice[]);
+        setPayments(paymentsRes.items as Payment[]);
+        setExpenses(expensesRes.items as Expense[]);
+      } catch (error) {
+        console.error('[v0] Accounting reports fetch error:', error);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchData();
+  }, [pb, isAuthenticated]);
+
+  useEffect(() => {
+    const now = new Date();
+    if (range === 'month') {
+      const first = new Date(now.getFullYear(), now.getMonth(), 1);
+      const last = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+      setStartDate(first.toISOString().split('T')[0]);
+      setEndDate(last.toISOString().split('T')[0]);
+    } else if (range === 'year') {
+      const first = new Date(now.getFullYear(), 0, 1);
+      const last = new Date(now.getFullYear(), 11, 31);
+      setStartDate(first.toISOString().split('T')[0]);
+      setEndDate(last.toISOString().split('T')[0]);
+    }
+  }, [range]);
+
+  const withinRange = (raw: string | undefined) => {
+    if (!raw) return false;
+    let value = raw;
+    if (value.includes(' ')) value = value.replace(' ', 'T');
+    const d = new Date(value);
+    if (isNaN(d.getTime())) return false;
+    if (!startDate && !endDate) return true;
+    const start = startDate ? new Date(startDate + 'T00:00:00') : undefined;
+    const end = endDate ? new Date(endDate + 'T23:59:59') : undefined;
+    if (start && d < start) return false;
+    if (end && d > end) return false;
+    return true;
+  };
+
+  const incomeSummary = useMemo<SummaryRow[]>(() => {
+    const inRangeInvoices = invoices.filter((inv) => withinRange(inv.invoice_date));
+    const inRangePayments = payments.filter((pay) => withinRange(pay.payment_date));
+
+    const billed = inRangeInvoices.reduce((sum, inv) => sum + (inv.total_amount || 0), 0);
+    const paid = inRangePayments.reduce((sum, p) => sum + (p.amount || 0), 0);
+    const outstanding = billed - paid;
+
+    return [
+      { label: 'Pendapatan Ditagihkan (Invoice)', value: billed },
+      { label: 'Pembayaran Diterima', value: paid },
+      { label: 'Piutang Usaha', value: outstanding },
+    ];
+  }, [invoices, payments, startDate, endDate]);
+
+  const expenseSummary = useMemo<SummaryRow[]>(() => {
+    const inRangeExpenses = expenses.filter((exp) => withinRange(exp.expense_date));
+    const total = inRangeExpenses.reduce((sum, exp) => sum + (exp.amount || 0), 0);
+
+    const byCategory: Record<string, number> = {};
+    inRangeExpenses.forEach((exp) => {
+      const key = exp.category || 'lainnya';
+      byCategory[key] = (byCategory[key] || 0) + (exp.amount || 0);
+    });
+
+    const detail = Object.entries(byCategory)
+      .sort((a, b) => b[1] - a[1])
+      .map<SummaryRow>(([label, value]) => ({ label, value }));
+
+    return [{ label: 'Total Pengeluaran', value: total }, ...detail];
+  }, [expenses, startDate, endDate]);
+
+  const totalIncome = incomeSummary[0]?.value || 0;
+  const totalExpenses = expenseSummary[0]?.value || 0;
+  const profit = totalIncome - totalExpenses;
+
+  return (
+    <MainLayout title="Laporan Akuntansi">
+      <div className="space-y-6">
+        <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-4">
+          <div>
+            <h1 className="text-2xl font-semibold text-white">Laporan Keuangan</h1>
+            <p className="text-sm text-slate-400">
+              Ringkasan pendapatan, pengeluaran, dan laba rugi berdasarkan data invoice, pembayaran, dan
+              pengeluaran.
+            </p>
+          </div>
+
+          <div className="flex flex-col md:flex-row gap-2 md:items-end">
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={() => setRange('month')}
+                className={`px-3 py-1.5 rounded-md text-xs font-medium ${
+                  range === 'month'
+                    ? 'bg-orange-500 text-white'
+                    : 'bg-slate-800 text-slate-300 border border-slate-700'
+                }`}
+              >
+                Bulan ini
+              </button>
+              <button
+                type="button"
+                onClick={() => setRange('year')}
+                className={`px-3 py-1.5 rounded-md text-xs font-medium ${
+                  range === 'year'
+                    ? 'bg-orange-500 text-white'
+                    : 'bg-slate-800 text-slate-300 border border-slate-700'
+                }`}
+              >
+                Tahun ini
+              </button>
+              <button
+                type="button"
+                onClick={() => setRange('custom')}
+                className={`px-3 py-1.5 rounded-md text-xs font-medium ${
+                  range === 'custom'
+                    ? 'bg-orange-500 text-white'
+                    : 'bg-slate-800 text-slate-300 border border-slate-700'
+                }`}
+              >
+                Custom
+              </button>
+            </div>
+
+            <div className="flex gap-2">
+              <div className="relative">
+                <Calendar className="w-4 h-4 text-slate-500 absolute left-2 top-1/2 -translate-y-1/2" />
+                <Input
+                  type="date"
+                  value={startDate}
+                  onChange={(e) => setStartDate(e.target.value)}
+                  className="pl-8 bg-slate-900 border-slate-700 text-xs text-slate-200 h-9"
+                />
+              </div>
+              <div className="relative">
+                <Calendar className="w-4 h-4 text-slate-500 absolute left-2 top-1/2 -translate-y-1/2" />
+                <Input
+                  type="date"
+                  value={endDate}
+                  onChange={(e) => setEndDate(e.target.value)}
+                  className="pl-8 bg-slate-900 border-slate-700 text-xs text-slate-200 h-9"
+                />
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className="bg-slate-900 border border-slate-700 rounded-lg p-5">
+            <p className="text-slate-400 text-xs font-medium mb-2 uppercase tracking-wide">
+              Pendapatan Bersih (Invoice)
+            </p>
+            <p className="text-3xl font-bold text-emerald-400">{formatCurrency(totalIncome)}</p>
+          </div>
+          <div className="bg-slate-900 border border-slate-700 rounded-lg p-5">
+            <p className="text-slate-400 text-xs font-medium mb-2 uppercase tracking-wide">
+              Total Pengeluaran
+            </p>
+            <p className="text-3xl font-bold text-red-400">{formatCurrency(totalExpenses)}</p>
+          </div>
+          <div className="bg-slate-900 border border-slate-700 rounded-lg p-5">
+            <p className="text-slate-400 text-xs font-medium mb-2 uppercase tracking-wide">
+              Laba / Rugi
+            </p>
+            <p
+              className={`text-3xl font-bold ${
+                profit >= 0 ? 'text-emerald-400' : 'text-red-400'
+              }`}
+            >
+              {formatCurrency(profit)}
+            </p>
+          </div>
+        </div>
+
+        {loading ? (
+          <div className="bg-slate-900 border border-slate-700 rounded-lg p-10 flex items-center justify-center text-slate-400 gap-3">
+            <Loader2 className="w-5 h-5 animate-spin" />
+            Memuat data laporan...
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <div className="bg-slate-900 border border-slate-700 rounded-lg p-6">
+              <h2 className="text-sm font-semibold text-white mb-4">Ringkasan Pendapatan</h2>
+              <div className="space-y-2">
+                {incomeSummary.map((row) => (
+                  <div
+                    key={row.label}
+                    className="flex items-center justify-between text-sm text-slate-200"
+                  >
+                    <span className="text-slate-400">{row.label}</span>
+                    <span className="font-semibold">{formatCurrency(row.value)}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="bg-slate-900 border border-slate-700 rounded-lg p-6">
+              <h2 className="text-sm font-semibold text-white mb-4">Ringkasan Pengeluaran</h2>
+              <div className="space-y-2">
+                {expenseSummary.map((row) => (
+                  <div
+                    key={row.label}
+                    className="flex items-center justify-between text-sm text-slate-200"
+                  >
+                    <span className="text-slate-400 capitalize">{row.label}</span>
+                    <span className="font-semibold">{formatCurrency(row.value)}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+    </MainLayout>
+  );
+}
+
