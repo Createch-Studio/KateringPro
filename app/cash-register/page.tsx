@@ -112,6 +112,7 @@ export default function CashRegisterPage() {
         status: 'open',
       })) as CashRegisterSession;
       setSession(created);
+      await fetchHistory();
       toast.success('Cash register berhasil dibuka');
     } catch (error: any) {
       const message = getPocketBaseErrorMessage(error, 'Gagal membuka cash register');
