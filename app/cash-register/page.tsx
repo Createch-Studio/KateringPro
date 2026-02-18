@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { useAuth } from '@/lib/auth-context';
 import { CashRegisterSession, Payment } from '@/lib/types';
@@ -62,34 +62,34 @@ export default function CashRegisterPage() {
     fetchSession();
   }, [pb, user, isAuthenticated]);
 
-  useEffect(() => {
-    const fetchHistory = async () => {
-      if (!pb || !user || !isAuthenticated) return;
+  const fetchHistory = useCallback(async () => {
+    if (!pb || !user || !isAuthenticated) return;
 
-      try {
-        setHistoryLoading(true);
-        const res = await pb
-          .collection('cash_register_sessions')
-          .getList<CashRegisterSession>(historyPage, 10, {
-            filter: `user_id = "${user.id}"`,
-            sort: '-open_time',
-          });
-        setHistory(res.items);
-        setHistoryTotalPages(res.totalPages || 1);
-      } catch (error: any) {
-        const message = getPocketBaseErrorMessage(
-          error,
-          'Gagal memuat histori cash register'
-        );
-        console.error('[v0] Fetch cash register history error:', message);
-        toast.error(message);
-      } finally {
-        setHistoryLoading(false);
-      }
-    };
-
-    fetchHistory();
+    try {
+      setHistoryLoading(true);
+      const res = await pb
+        .collection('cash_register_sessions')
+        .getList<CashRegisterSession>(historyPage, 10, {
+          filter: `user_id = "${user.id}"`,
+          sort: '-open_time',
+        });
+      setHistory(res.items);
+      setHistoryTotalPages(res.totalPages || 1);
+    } catch (error: any) {
+      const message = getPocketBaseErrorMessage(
+        error,
+        'Gagal memuat histori cash register'
+      );
+      console.error('[v0] Fetch cash register history error:', message);
+      toast.error(message);
+    } finally {
+      setHistoryLoading(false);
+    }
   }, [pb, user, isAuthenticated, historyPage]);
+
+  useEffect(() => {
+    fetchHistory();
+  }, [fetchHistory]);
 
   const handleOpen = async () => {
     if (isViewOnlyRole) {
@@ -195,6 +195,7 @@ export default function CashRegisterPage() {
       setCloseDialogOpen(false);
       setActualCash(0);
       setCloseNote('');
+      await fetchHistory();
       toast.success('Cash register berhasil ditutup');
     } catch (error: any) {
       const message = getPocketBaseErrorMessage(error, 'Gagal menutup cash register');
