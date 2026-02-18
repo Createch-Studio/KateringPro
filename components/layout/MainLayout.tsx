@@ -1,6 +1,6 @@
 'use client';
 
-import { ReactNode } from 'react';
+import { ReactNode, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/lib/auth-context';
 import { Sidebar } from './Sidebar';
@@ -14,6 +14,7 @@ interface MainLayoutProps {
 export function MainLayout({ title, children }: MainLayoutProps) {
   const router = useRouter();
   const { isAuthenticated, isLoading } = useAuth();
+  const [sidebarOpen, setSidebarOpen] = useState(false);
 
   // Redirect to login if not authenticated
   if (!isLoading && !isAuthenticated) {
@@ -34,9 +35,21 @@ export function MainLayout({ title, children }: MainLayoutProps) {
 
   return (
     <div className="bg-slate-950 min-h-screen">
-      <Sidebar />
-      <div className="ml-60">
-        <Topbar title={title} />
+      <Sidebar
+        mobileOpen={sidebarOpen}
+        onCloseMobile={() => setSidebarOpen(false)}
+      />
+      {sidebarOpen && (
+        <div
+          className="fixed inset-0 z-30 bg-black/50 lg:hidden"
+          onClick={() => setSidebarOpen(false)}
+        />
+      )}
+      <div className="lg:ml-60">
+        <Topbar
+          title={title}
+          onToggleSidebar={() => setSidebarOpen((prev) => !prev)}
+        />
         <main className="p-6 overflow-y-auto">
           {children}
         </main>
