@@ -37,6 +37,8 @@ export function AddOrderDialog({ pb, customers, onOrderAdded }: AddOrderDialogPr
   const [selectedMenuId, setSelectedMenuId] = useState('');
   const [selectedMenuQty, setSelectedMenuQty] = useState(1);
   const [orderItems, setOrderItems] = useState<OrderItem[]>([]);
+  const [taxEnabled, setTaxEnabled] = useState(false);
+  const [taxPercent, setTaxPercent] = useState(11);
   const [formData, setFormData] = useState({
     order_number: '',
     customer_id: '',
@@ -104,7 +106,8 @@ export function AddOrderDialog({ pb, customers, onOrderAdded }: AddOrderDialogPr
   };
 
   const subtotal = orderItems.reduce((sum, item) => sum + item.total, 0);
-  const tax = subtotal * 0.1;
+  const effectiveTaxPercent = taxEnabled ? taxPercent : 0;
+  const tax = subtotal * (effectiveTaxPercent / 100);
   const total = subtotal + tax;
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -378,14 +381,49 @@ export function AddOrderDialog({ pb, customers, onOrderAdded }: AddOrderDialogPr
             )}
           </div>
 
-          <div className="grid grid-cols-2 gap-4 pt-2 border-t border-slate-700">
-            <div>
-              <p className="text-xs text-slate-400 mb-1">Subtotal</p>
-              <p className="text-lg font-semibold text-white">{formatCurrency(subtotal)}</p>
+          <div className="border-t border-slate-700 pt-4 mt-4 space-y-3">
+            <div className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                checked={taxEnabled}
+                onChange={(e) => setTaxEnabled(e.target.checked)}
+                disabled={loading}
+                className="h-4 w-4 rounded border-slate-600 bg-slate-800 text-orange-500"
+              />
+              <span className="text-sm text-slate-200">Aktifkan pajak</span>
             </div>
-            <div>
-              <p className="text-xs text-slate-400 mb-1">Pajak (10%)</p>
-              <p className="text-lg font-semibold text-white">{formatCurrency(tax)}</p>
+            <div className="flex items-center gap-3">
+              <span className="text-xs text-slate-400">Persentase pajak</span>
+              <Input
+                type="number"
+                min={0}
+                max={100}
+                value={taxPercent}
+                onChange={(e) =>
+                  setTaxPercent(() => {
+                    const value = Number.parseFloat(e.target.value);
+                    if (Number.isNaN(value) || value < 0) return 0;
+                    if (value > 100) return 100;
+                    return value;
+                  })
+                }
+                disabled={loading || !taxEnabled}
+                className="w-20 bg-slate-800 border-slate-700 text-white text-sm"
+              />
+              <span className="text-sm text-slate-400">%</span>
+            </div>
+            <div className="grid grid-cols-2 gap-4 pt-2">
+              <div>
+                <p className="text-xs text-slate-400 mb-1">Subtotal</p>
+                <p className="text-lg font-semibold text-white">{formatCurrency(subtotal)}</p>
+              </div>
+              <div>
+                <p className="text-xs text-slate-400 mb-1">
+                  Pajak ({taxEnabled ? taxPercent : 0}
+                  %)
+                </p>
+                <p className="text-lg font-semibold text-white">{formatCurrency(tax)}</p>
+              </div>
             </div>
           </div>
 
