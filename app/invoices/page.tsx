@@ -15,7 +15,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { toast } from 'sonner';
 import { formatCurrency, formatDate } from '@/lib/api';
-import { Invoice, Order } from '@/lib/types';
+import { Customer, Invoice, Order } from '@/lib/types';
 import { AddInvoiceDialog } from '@/components/dialogs/AddInvoiceDialog';
 
 export default function InvoicesPage() {
@@ -171,6 +171,10 @@ export default function InvoicesPage() {
         payload.due_date = null;
       }
 
+      if (selectedInvoice.order_id) {
+        payload.order_id = selectedInvoice.order_id;
+      }
+
       const updated = (await pb
         .collection('invoices')
         .update(selectedInvoice.id, payload)) as Invoice;
@@ -192,9 +196,159 @@ export default function InvoicesPage() {
     setViewOpen(true);
   };
 
-  const handlePrintInvoice = () => {
+  const handlePrintInvoice = async () => {
     if (!selectedInvoice) return;
-    window.print();
+
+    const printWindow = window.open('', '_blank', 'width=800,height=600');
+    if (!printWindow) return;
+
+    const invoice = selectedInvoice;
+    const relatedOrder = orders.find((o) => o.id === invoice.order_id);
+
+    let customerName = (invoice as any).customer || '';
+    let customerAddress = '';
+    let customerPhone = '';
+
+    if (pb && relatedOrder?.customer_id) {
+      try {
+        const customer = (await pb
+          .collection('customers')
+          .getOne(relatedOrder.customer_id)) as Customer;
+        customerName = customer.name || customerName;
+        customerAddress = customer.address || '';
+        customerPhone = customer.phone || '';
+      } catch (error) {
+        console.error('[v0] Fetch customer for invoice print error:', error);
+      }
+    }
+
+    const companyName = 'Nama Perusahaan';
+    const companyAddress = 'Alamat Perusahaan';
+    const companyPhone = 'Telepon Perusahaan';
+
+    const formatCurrencyLocal = (value: number | undefined) => {
+      if (!value) return 'Rp 0';
+      try {
+        return new Intl.NumberFormat('id-ID', {
+          style: 'currency',
+          currency: 'IDR',
+          minimumFractionDigits: 0,
+        }).format(value);
+      } catch {
+        return `Rp ${value.toLocaleString('id-ID')}`;
+      }
+    };
+
+    const html = `
+<!DOCTYPE html>
+<html lang="id">
+  <head>
+    <meta charSet="utf-8" />
+    <title>Invoice ${invoice.invoice_number}</title>
+    <style>
+      body { font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; padding: 24px; color: #0f172a; }
+      h1 { font-size: 22px; margin: 0; letter-spacing: 2px; }
+      .muted { color: #64748b; font-size: 12px; }
+      .section { margin-top: 16px; padding-top: 12px; border-top: 1px solid #e2e8f0; }
+      .row { display: flex; justify-content: space-between; margin-bottom: 4px; font-size: 14px; }
+      .label { color: #64748b; }
+      .value { font-weight: 500; }
+      .total { font-weight: 700; font-size: 16px; margin-top: 8px; }
+      .header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 16px; padding-bottom: 12px; border-bottom: 2px solid #0f172a; }
+      .company-name { font-size: 18px; font-weight: 700; margin-bottom: 4px; }
+      .company-line { font-size: 12px; color: #475569; }
+      .invoice-meta { text-align: right; font-size: 12px; }
+      .invoice-title { font-size: 20px; font-weight: 700; margin-bottom: 8px; }
+      .two-cols { display: flex; justify-content: space-between; gap: 32px; }
+      .col { flex: 1; font-size: 14px; }
+    </style>
+  </head>
+  <body>
+    <div class="header">
+      <div>
+        <div class="company-name">${companyName}</div>
+        <div class="company-line">${companyAddress}</div>
+        <div class="company-line">${companyPhone}</div>
+      </div>
+      <div class="invoice-meta">
+        <div class="invoice-title">INVOICE</div>
+        <div class="label">No. Invoice</div>
+        <div class="value">${invoice.invoice_number}</div>
+        <div class="label" style="margin-top:8px;">Status</div>
+        <div class="value" style="text-transform:capitalize;">${invoice.status}</div>
+      </div>
+    </div>
+
+    <div class="section two-cols">
+      <div class="col">
+        <div class="label">Kepada</div>
+        <div class="value" style="margin-top:4px;">${customerName || '-'}</div>
+        ${
+          customerAddress
+            ? `<div class="company-line" style="margin-top:2px;">${customerAddress}</div>`
+            : ''
+        }
+        ${
+          customerPhone
+            ? `<div class="company-line" style="margin-top:2px;">Telp: ${customerPhone}</div>`
+            : ''
+        }
+      </div>
+      <div class="col">
+        <div class="label">Tanggal Invoice</div>
+        <div class="value">${formatDate(invoice.invoice_date)}</div>
+        <div class="label" style="margin-top:8px;">Jatuh Tempo</div>
+        <div class="value">${invoice.due_date ? formatDate(invoice.due_date) : '-'}</div>
+        <div class="label" style="margin-top:8px;">Order Terkait</div>
+        <div class="value">
+          ${
+            relatedOrder
+              ? `${relatedOrder.order_number} - ${formatCurrencyLocal(
+                  relatedOrder.total || 0
+                )}`
+              : '-'
+          }
+        </div>
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="row">
+        <div class="label">Nominal</div>
+        <div class="value">${formatCurrencyLocal(invoice.amount)}</div>
+      </div>
+      <div class="row">
+        <div class="label">Pajak</div>
+        <div class="value">${formatCurrencyLocal(invoice.tax_amount || 0)}</div>
+      </div>
+      <div class="row total">
+        <div>Total</div>
+        <div>${formatCurrencyLocal(invoice.total_amount)}</div>
+      </div>
+    </div>
+
+    ${
+      invoice.notes
+        ? `<div class="section">
+      <div class="label">Catatan</div>
+      <div class="value">${invoice.notes.replace(/\n/g, '<br />')}</div>
+    </div>`
+        : ''
+    }
+
+    <script>
+      window.onload = function() {
+        window.print();
+        window.onafterprint = function() { window.close(); };
+      };
+    </script>
+  </body>
+</html>
+    `;
+
+    printWindow.document.open();
+    printWindow.document.write(html);
+    printWindow.document.close();
   };
 
   return (
@@ -286,16 +440,6 @@ export default function InvoicesPage() {
                           <Edit2 size={16} />
                         </button>
                         <button
-                          type="button"
-                          onClick={() => {
-                            setSelectedInvoice(invoice);
-                            handlePrintInvoice();
-                          }}
-                          className="p-2 hover:bg-slate-800 rounded-lg text-slate-400 hover:text-slate-200 transition-colors"
-                        >
-                          <Printer size={16} />
-                        </button>
-                        <button
                           onClick={() => handleDelete(invoice.id)}
                           className="p-2 hover:bg-red-500/10 rounded-lg text-slate-400 hover:text-red-400 transition-colors"
                         >
@@ -350,6 +494,36 @@ export default function InvoicesPage() {
                     />
                   </div>
                 </div>
+
+                {selectedInvoice && (
+                  <div>
+                    <label className="block text-sm font-medium text-slate-300 mb-2">
+                      Order Terkait
+                    </label>
+                    <select
+                      value={selectedInvoice.order_id}
+                      onChange={(e) => {
+                        const newOrderId = e.target.value;
+                        if (!newOrderId) return;
+                        setSelectedInvoice((prev) =>
+                          prev ? { ...prev, order_id: newOrderId } : prev
+                        );
+                      }}
+                      disabled={saving || orders.length === 0}
+                      className="w-full px-3 py-2 bg-slate-800 border border-slate-700 text-white rounded-md text-sm"
+                    >
+                      {orders.length === 0 ? (
+                        <option>Tidak ada order</option>
+                      ) : (
+                        orders.map((order) => (
+                          <option key={order.id} value={order.id}>
+                            {order.order_number} - {formatCurrency(order.total || 0)}
+                          </option>
+                        ))
+                      )}
+                    </select>
+                  </div>
+                )}
 
                 <div>
                   <label className="block text-sm font-medium text-slate-300 mb-2">

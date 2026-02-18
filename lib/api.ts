@@ -52,7 +52,11 @@ export function formatCurrency(value: number, locale: string = 'id-ID'): string 
 }
 
 export function formatDate(date: string | Date, locale: string = 'id-ID'): string {
-  return new Date(date).toLocaleDateString(locale, {
+  const d = new Date(date);
+  if (Number.isNaN(d.getTime())) {
+    return '-';
+  }
+  return d.toLocaleDateString(locale, {
     year: 'numeric',
     month: 'long',
     day: 'numeric',
@@ -61,7 +65,11 @@ export function formatDate(date: string | Date, locale: string = 'id-ID'): strin
 }
 
 export function formatDateTime(date: string | Date, locale: string = 'id-ID'): string {
-  return new Date(date).toLocaleString(locale, {
+  const d = new Date(date);
+  if (Number.isNaN(d.getTime())) {
+    return '-';
+  }
+  return d.toLocaleString(locale, {
     year: 'numeric',
     month: 'long',
     day: 'numeric',
