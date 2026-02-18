@@ -34,10 +34,10 @@ export default function InvoicesPage() {
     due_date: '',
     status: 'draft' as Invoice['status'],
     amount: 0,
-    tax_amount: 0,
-    total_amount: 0,
     notes: '',
   });
+  const [editTaxEnabled, setEditTaxEnabled] = useState(false);
+  const [editTaxPercent, setEditTaxPercent] = useState(11);
 
   useEffect(() => {
     if (!isAuthenticated || !pb) {
@@ -125,13 +125,20 @@ export default function InvoicesPage() {
 
   const handleOpenEdit = (invoice: Invoice) => {
     setSelectedInvoice(invoice);
+    const baseAmount = invoice.amount || 0;
+    const baseTax = invoice.tax_amount || 0;
+    const enabled = baseTax > 0;
+    let percent = 11;
+    if (enabled && baseAmount > 0) {
+      percent = Math.round((baseTax / baseAmount) * 100);
+    }
+    setEditTaxEnabled(enabled);
+    setEditTaxPercent(percent);
     setEditForm({
       invoice_date: getDateOnly(invoice.invoice_date),
       due_date: getDateOnly(invoice.due_date),
       status: invoice.status,
       amount: invoice.amount,
-      tax_amount: invoice.tax_amount || 0,
-      total_amount: invoice.total_amount,
       notes: invoice.notes || '',
     });
     setEditOpen(true);
@@ -147,11 +154,14 @@ export default function InvoicesPage() {
 
     try {
       setSaving(true);
+      const effectiveTaxPercent = editTaxEnabled ? editTaxPercent : 0;
+      const taxAmount = editForm.amount * (effectiveTaxPercent / 100);
+      const totalAmount = editForm.amount + taxAmount;
       const payload: any = {
         invoice_date: editForm.invoice_date,
         amount: editForm.amount,
-        tax_amount: editForm.tax_amount || undefined,
-        total_amount: editForm.total_amount,
+        tax_amount: taxAmount || undefined,
+        total_amount: totalAmount,
         status: editForm.status,
         notes: editForm.notes.trim() || undefined,
       };
@@ -365,64 +375,77 @@ export default function InvoicesPage() {
                   </select>
                 </div>
 
-                <div className="grid grid-cols-3 gap-4">
-                  <div>
-                    <label className="block text-sm font-medium text-slate-300 mb-2">
-                      Nominal
-                    </label>
-                    <Input
-                      type="number"
-                      min={0}
-                      value={editForm.amount}
-                      onChange={(e) =>
-                        setEditForm((prev) => ({
-                          ...prev,
-                          amount: Number(e.target.value) || 0,
-                          total_amount:
-                            (Number(e.target.value) || 0) + (prev.tax_amount || 0),
-                        }))
-                      }
+                <div className="space-y-3">
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      checked={editTaxEnabled}
+                      onChange={(e) => setEditTaxEnabled(e.target.checked)}
                       disabled={saving}
-                      className="bg-slate-800 border-slate-700 text-white"
+                      className="h-4 w-4 rounded border-slate-600 bg-slate-800 text-orange-500"
                     />
+                    <span className="text-sm text-slate-200">Aktifkan pajak</span>
                   </div>
-                  <div>
-                    <label className="block text-sm font-medium text-slate-300 mb-2">
-                      Pajak
-                    </label>
-                    <Input
-                      type="number"
-                      min={0}
-                      value={editForm.tax_amount}
-                      onChange={(e) =>
-                        setEditForm((prev) => ({
-                          ...prev,
-                          tax_amount: Number(e.target.value) || 0,
-                          total_amount:
-                            prev.amount + (Number(e.target.value) || 0),
-                        }))
-                      }
-                      disabled={saving}
-                      className="bg-slate-800 border-slate-700 text-white"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-slate-300 mb-2">
-                      Total
-                    </label>
-                    <Input
-                      type="number"
-                      min={0}
-                      value={editForm.total_amount}
-                      onChange={(e) =>
-                        setEditForm((prev) => ({
-                          ...prev,
-                          total_amount: Number(e.target.value) || 0,
-                        }))
-                      }
-                      disabled={saving}
-                      className="bg-slate-800 border-slate-700 text-white"
-                    />
+                  <div className="grid grid-cols-3 gap-4">
+                    <div>
+                      <label className="block text-sm font-medium text-slate-300 mb-2">
+                        Nominal
+                      </label>
+                      <Input
+                        type="number"
+                        min={0}
+                        value={editForm.amount}
+                        onChange={(e) =>
+                          setEditForm((prev) => ({
+                            ...prev,
+                            amount: Number(e.target.value) || 0,
+                          }))
+                        }
+                        disabled={saving}
+                        className="bg-slate-800 border-slate-700 text-white"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-slate-300 mb-2">
+                        Pajak (%)
+                      </label>
+                      <Input
+                        type="number"
+                        min={0}
+                        max={100}
+                        value={editTaxPercent}
+                        onChange={(e) => {
+                          const value = Number.parseFloat(e.target.value);
+                          if (Number.isNaN(value)) {
+                            setEditTaxPercent(0);
+                          } else if (value < 0) {
+                            setEditTaxPercent(0);
+                          } else if (value > 100) {
+                            setEditTaxPercent(100);
+                          } else {
+                            setEditTaxPercent(value);
+                          }
+                        }}
+                        disabled={saving || !editTaxEnabled}
+                        className="bg-slate-800 border-slate-700 text-white"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-slate-300 mb-2">
+                        Total
+                      </label>
+                      <Input
+                        type="number"
+                        min={0}
+                        value={
+                          editForm.amount +
+                          editForm.amount *
+                            ((editTaxEnabled ? editTaxPercent : 0) / 100)
+                        }
+                        disabled
+                        className="bg-slate-800 border-slate-700 text-white"
+                      />
+                    </div>
                   </div>
                 </div>
 

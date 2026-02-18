@@ -40,6 +40,77 @@ export default function PaymentsPage() {
     order_id: '',
   });
 
+  const updateRelatedRecords = async (payment: Payment, allPayments: Payment[]) => {
+    if (!pb) return;
+
+    if (payment.invoice_id) {
+      const currentInvoice = invoices.find((inv) => inv.id === payment.invoice_id);
+      if (currentInvoice) {
+        const invoicePayments = allPayments.filter((p) => p.invoice_id === payment.invoice_id);
+        const totalPaid = invoicePayments.reduce((sum, p) => sum + (p.amount || 0), 0);
+        const totalAmount =
+          (currentInvoice as any).total_amount ??
+          (currentInvoice as any).amount ??
+          currentInvoice.total_amount ??
+          currentInvoice.amount ??
+          0;
+
+        if (totalAmount > 0) {
+          let nextStatus = currentInvoice.status;
+          if (totalPaid >= totalAmount) {
+            nextStatus = 'paid';
+          } else if (totalPaid > 0 && totalPaid < totalAmount) {
+            nextStatus =
+              currentInvoice.status === 'overdue' ? currentInvoice.status : 'partial';
+          }
+
+          if (nextStatus !== currentInvoice.status) {
+            try {
+              const updated = (await pb
+                .collection('invoices')
+                .update(currentInvoice.id, { status: nextStatus })) as Invoice;
+              setInvoices((prev) =>
+                prev.map((inv) => (inv.id === updated.id ? updated : inv))
+              );
+            } catch (error) {
+              console.error('[v0] Update invoice status error:', error);
+            }
+          }
+        }
+      }
+    }
+
+    if (payment.order_id) {
+      const currentOrder = orders.find((o) => o.id === payment.order_id);
+      if (currentOrder) {
+        const orderPayments = allPayments.filter((p) => p.order_id === payment.order_id);
+        const totalPaid = orderPayments.reduce((sum, p) => {
+          if (p.payment_type === 'refund') {
+            return sum - (p.amount || 0);
+          }
+          return sum + (p.amount || 0);
+        }, 0);
+
+        const payload: any = {
+          paid_amount: totalPaid,
+        };
+
+        if ((currentOrder.total || 0) > 0 && totalPaid >= (currentOrder.total || 0)) {
+          payload.status = 'completed';
+        }
+
+        try {
+          const updated = (await pb
+            .collection('orders')
+            .update(currentOrder.id, payload)) as Order;
+          setOrders((prev) => prev.map((o) => (o.id === updated.id ? updated : o)));
+        } catch (error) {
+          console.error('[v0] Update order status error:', error);
+        }
+      }
+    }
+  };
+
   useEffect(() => {
     if (!pb || !isAuthenticated) {
       setLoading(false);
@@ -159,8 +230,11 @@ export default function PaymentsPage() {
         payload.order_id = formData.order_id;
       }
 
-      const created = await pb.collection('payments').create(payload);
-      setPayments((prev) => [created as Payment, ...prev]);
+      const created = (await pb.collection('payments').create(payload)) as Payment;
+      const nextPayments = [created, ...payments];
+      setPayments(nextPayments);
+
+      await updateRelatedRecords(created, nextPayments);
       toast.success('Pembayaran berhasil dicatat');
       setAddOpen(false);
     } catch (error: any) {
