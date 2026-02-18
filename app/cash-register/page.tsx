@@ -27,6 +27,8 @@ export default function CashRegisterPage() {
   const [historyPage, setHistoryPage] = useState(1);
   const [historyTotalPages, setHistoryTotalPages] = useState(1);
   const [closeDialogOpen, setCloseDialogOpen] = useState(false);
+  const [viewDialogOpen, setViewDialogOpen] = useState(false);
+  const [selectedHistory, setSelectedHistory] = useState<CashRegisterSession | null>(null);
   const [actualCash, setActualCash] = useState<number>(0);
   const [expectedCash, setExpectedCash] = useState<number>(0);
   const [expectedLoading, setExpectedLoading] = useState(false);
@@ -341,6 +343,9 @@ export default function CashRegisterPage() {
                       <th className="px-4 py-3 text-center text-xs font-semibold text-slate-300 uppercase">
                         Status
                       </th>
+                      <th className="px-4 py-3 text-center text-xs font-semibold text-slate-300 uppercase">
+                        Aksi
+                      </th>
                     </tr>
                   </thead>
                   <tbody>
@@ -385,6 +390,20 @@ export default function CashRegisterPage() {
                               ? `Terbuka oleh ${openedByLabel}`
                               : `Ditutup oleh ${openedByLabel}`}
                           </span>
+                        </td>
+                        <td className="px-4 py-3 text-center">
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            className="border-slate-700 text-slate-200 hover:text-white"
+                            onClick={() => {
+                              setSelectedHistory(item);
+                              setViewDialogOpen(true);
+                            }}
+                          >
+                            Lihat
+                          </Button>
                         </td>
                       </tr>
                     ))}
@@ -509,6 +528,84 @@ export default function CashRegisterPage() {
                     className="bg-red-600 hover:bg-red-700 text-white"
                   >
                     {saving ? 'Menutup...' : 'Konfirmasi & Tutup'}
+                  </Button>
+                </div>
+              </div>
+            )}
+          </DialogContent>
+        </Dialog>
+
+        <Dialog open={viewDialogOpen} onOpenChange={setViewDialogOpen}>
+          <DialogContent className="sm:max-w-[460px] bg-slate-900 border border-slate-700">
+            <DialogHeader>
+              <DialogTitle className="text-white">Detail Cash Register</DialogTitle>
+              <DialogDescription className="text-slate-400">
+                Detail sesi cash register termasuk saldo dan catatan penutupan.
+              </DialogDescription>
+            </DialogHeader>
+
+            {selectedHistory && (
+              <div className="space-y-4 mt-2 text-sm">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <div className="bg-slate-800/60 border border-slate-700 rounded p-3">
+                    <p className="text-xs text-slate-400 mb-1">Waktu Buka</p>
+                    <p className="text-slate-100">
+                      {formatDateTime(selectedHistory.open_time)}
+                    </p>
+                  </div>
+                  <div className="bg-slate-800/60 border border-slate-700 rounded p-3">
+                    <p className="text-xs text-slate-400 mb-1">Waktu Tutup</p>
+                    <p className="text-slate-100">
+                      {selectedHistory.close_time
+                        ? formatDateTime(selectedHistory.close_time)
+                        : '-'}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                  <div className="bg-slate-800/60 border border-slate-700 rounded p-3">
+                    <p className="text-xs text-slate-400 mb-1">Saldo Awal</p>
+                    <p className="text-base font-semibold text-slate-100">
+                      {formatCurrency(selectedHistory.opening_balance || 0)}
+                    </p>
+                  </div>
+                  <div className="bg-slate-800/60 border border-slate-700 rounded p-3">
+                    <p className="text-xs text-slate-400 mb-1">Saldo Akhir</p>
+                    <p className="text-base font-semibold text-slate-100">
+                      {selectedHistory.closing_balance != null
+                        ? formatCurrency(selectedHistory.closing_balance)
+                        : '-'}
+                    </p>
+                  </div>
+                  <div className="bg-slate-800/60 border border-slate-700 rounded p-3">
+                    <p className="text-xs text-slate-400 mb-1">Variance</p>
+                    <p className="text-base font-semibold text-orange-400">
+                      {selectedHistory.closing_balance != null
+                        ? formatCurrency(
+                            (selectedHistory.closing_balance || 0) -
+                              (selectedHistory.opening_balance || 0)
+                          )
+                        : '-'}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="bg-slate-800/60 border border-slate-700 rounded p-3">
+                  <p className="text-xs text-slate-400 mb-1">Catatan Penutupan</p>
+                  <p className="text-sm text-slate-100 whitespace-pre-line">
+                    {selectedHistory.notes || '-'}
+                  </p>
+                </div>
+
+                <div className="flex justify-end pt-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => setViewDialogOpen(false)}
+                    className="border-slate-700 text-slate-300 hover:text-white"
+                  >
+                    Tutup
                   </Button>
                 </div>
               </div>

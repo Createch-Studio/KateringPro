@@ -1,6 +1,6 @@
-# KateringPro — ERP & Akuntansi
+# Ledgr — ERP & Akuntansi
 
-A modern catering management system built with **Next.js 16** and **PocketBase**, designed for managing customers, orders, menus, invoices, and finances.
+A modern business management system built with **Next.js 16** and **PocketBase**, designed for managing customers, orders, menus, invoices, and finances.
 
 ## 🎯 Features
 
@@ -82,7 +82,7 @@ npm run dev
 ## 📁 Project Structure
 
 ```
-KateringPro/
+Ledgr/
 ├── app/
 │   ├── (auth)/login          # Login page
 │   ├── dashboard             # Main dashboard

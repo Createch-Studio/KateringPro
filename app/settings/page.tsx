@@ -433,7 +433,7 @@ export default function SettingsPage() {
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
               <p className="text-xs text-slate-400 mb-1">Aplikasi</p>
-              <p className="text-sm font-medium text-white">KateringPro ERP</p>
+              <p className="text-sm font-medium text-white">Ledgr ERP</p>
             </div>
             <div>
               <p className="text-xs text-slate-400 mb-1">Versi</p>

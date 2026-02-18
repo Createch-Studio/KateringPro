@@ -97,7 +97,7 @@ export function Sidebar() {
             🍽
           </div>
           <div>
-            <div className="font-serif text-lg font-bold text-white">KateringPro</div>
+            <div className="font-serif text-lg font-bold text-white">Ledgr</div>
             <div className="text-xs text-slate-400">ERP System</div>
           </div>
         </div>

@@ -56,16 +56,16 @@ export default function LoginPage() {
           {/* Logo */}
           <div className="flex items-center gap-3 mb-8">
             <div className="w-12 h-12 bg-orange-500 rounded-lg flex items-center justify-center text-xl font-bold text-white">
-              🍽
+              L
             </div>
             <div className="font-serif text-2xl font-bold text-white">
-              Katering<span className="text-orange-500">Pro</span>
+              Ledgr
             </div>
           </div>
 
-          <h1 className="text-2xl font-bold text-white mb-2">Sign In</h1>
+          <h1 className="text-2xl font-bold text-white mb-2">Masuk ke Ledgr</h1>
           <p className="text-slate-400 text-sm mb-6">
-            Enter your credentials to access KateringPro
+            Masukkan email dan password untuk mengakses Ledgr
           </p>
 
           <form onSubmit={handleLogin} className="space-y-4">
