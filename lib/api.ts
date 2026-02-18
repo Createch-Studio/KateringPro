@@ -1,4 +1,5 @@
 import PocketBase, { ClientResponseError } from 'pocketbase';
+import { Account, Invoice, JournalEntry } from './types';
 
 export async function fetchWithError<T>(
   fn: () => Promise<T>,
@@ -48,6 +49,8 @@ export function formatCurrency(value: number, locale: string = 'id-ID'): string 
   return new Intl.NumberFormat(locale, {
     style: 'currency',
     currency: 'IDR',
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 0,
   }).format(value);
 }
 
@@ -162,3 +165,59 @@ export const ingredientUnits = [
   { value: 'buah', label: 'Buah' },
   { value: 'lembar', label: 'Lembar' },
 ];
+
+export async function syncInvoiceRevenueJournal(pb: PocketBase, invoice: Invoice) {
+  try {
+    if (!pb || !invoice) return;
+    const activeStatuses: Array<Invoice['status']> = ['sent', 'partial', 'paid', 'overdue'];
+    const isActive = activeStatuses.includes(invoice.status);
+    const totalAmount = invoice.total_amount || invoice.amount || 0;
+    const reference = invoice.id;
+
+    if (!isActive || totalAmount <= 0) {
+      try {
+        const existing = await pb.collection('journal_entries').getList<JournalEntry>(1, 50, {
+          filter: `source = "system" && reference = "${reference}"`,
+        });
+        if (existing.items.length) {
+          await Promise.all(
+            existing.items.map((entry) => pb.collection('journal_entries').delete(entry.id))
+          );
+        }
+      } catch (error) {
+        console.error('[v0] syncInvoiceRevenueJournal cleanup error:', error);
+      }
+      return;
+    }
+
+    const accountsRes = await pb.collection('chart_of_accounts').getList<Account>(1, 1, {
+      filter: 'type = "revenue"',
+      sort: 'code',
+    });
+    const revenueAccount = accountsRes.items[0];
+    if (!revenueAccount) return;
+
+    const existingRes = await pb.collection('journal_entries').getList<JournalEntry>(1, 1, {
+      filter: `source = "system" && reference = "${reference}" && account_id = "${revenueAccount.id}"`,
+    });
+
+    const payload: Partial<JournalEntry> = {
+      entry_date: invoice.invoice_date,
+      account_id: revenueAccount.id,
+      reference,
+      description: invoice.notes || `Pendapatan invoice ${invoice.invoice_number}`,
+      debit: 0,
+      credit: totalAmount,
+      source: 'system',
+    };
+
+    if (existingRes.items.length > 0) {
+      const current = existingRes.items[0];
+      await pb.collection('journal_entries').update<JournalEntry>(current.id, payload);
+    } else {
+      await pb.collection('journal_entries').create<JournalEntry>(payload);
+    }
+  } catch (error) {
+    console.error('[v0] syncInvoiceRevenueJournal error:', error);
+  }
+}

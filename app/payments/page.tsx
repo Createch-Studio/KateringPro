@@ -14,7 +14,7 @@ import {
   DialogTitle,
   DialogTrigger,
 } from '@/components/ui/dialog';
-import { Search, Plus, Loader2 } from 'lucide-react';
+import { Search, Plus, Loader2, Eye, Edit2, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { formatCurrency, formatDate, getPocketBaseErrorMessage } from '@/lib/api';
 
@@ -27,6 +27,10 @@ export default function PaymentsPage() {
   const [search, setSearch] = useState('');
   const [addOpen, setAddOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [viewOpen, setViewOpen] = useState(false);
+  const [editOpen, setEditOpen] = useState(false);
+  const [selectedPayment, setSelectedPayment] = useState<Payment | null>(null);
+  const [editSubmitting, setEditSubmitting] = useState(false);
 
   const [formData, setFormData] = useState({
     payment_date: new Date().toISOString().split('T')[0],
@@ -39,6 +43,30 @@ export default function PaymentsPage() {
     invoice_id: '',
     order_id: '',
   });
+
+  const [editForm, setEditForm] = useState({
+    payment_date: '',
+    amount: 0,
+    method: 'cash' as Payment['method'],
+    reference_number: '',
+    bank_name: '',
+    payment_type: 'full_payment' as Payment['payment_type'],
+    notes: '',
+    invoice_id: '',
+    order_id: '',
+  });
+
+  const getDateOnly = (value: string | undefined) => {
+    if (!value) return '';
+    let v = value;
+    if (v.includes('T')) {
+      v = v.split('T')[0];
+    } else if (v.includes(' ')) {
+      v = v.split(' ')[0];
+    }
+    if (v.length > 10) return v.slice(0, 10);
+    return v;
+  };
 
   const updateRelatedRecords = async (payment: Payment, allPayments: Payment[]) => {
     if (!pb) return;
@@ -57,7 +85,11 @@ export default function PaymentsPage() {
 
         if (totalAmount > 0) {
           let nextStatus = currentInvoice.status;
-          if (totalPaid >= totalAmount) {
+          if (totalPaid <= 0) {
+            if (currentInvoice.status === 'paid' || currentInvoice.status === 'partial') {
+              nextStatus = 'sent';
+            }
+          } else if (totalPaid >= totalAmount) {
             nextStatus = 'paid';
           } else if (totalPaid > 0 && totalPaid < totalAmount) {
             nextStatus =
@@ -97,6 +129,12 @@ export default function PaymentsPage() {
 
         if ((currentOrder.total || 0) > 0 && totalPaid >= (currentOrder.total || 0)) {
           payload.status = 'completed';
+        } else if (
+          (currentOrder.total || 0) > 0 &&
+          totalPaid < (currentOrder.total || 0) &&
+          currentOrder.status === 'completed'
+        ) {
+          payload.status = 'confirmed';
         }
 
         try {
@@ -254,6 +292,102 @@ export default function PaymentsPage() {
   const getLinkedOrder = (payment: Payment) => {
     if (!payment.order_id) return undefined;
     return orders.find((o) => o.id === payment.order_id);
+  };
+
+  const handleOpenViewPayment = (payment: Payment) => {
+    setSelectedPayment(payment);
+    setViewOpen(true);
+  };
+
+  const handleOpenEditPayment = (payment: Payment) => {
+    setSelectedPayment(payment);
+    setEditForm({
+      payment_date: getDateOnly(payment.payment_date),
+      amount: payment.amount,
+      method: payment.method,
+      reference_number: payment.reference_number || '',
+      bank_name: payment.bank_name || '',
+      payment_type: payment.payment_type,
+      notes: payment.notes || '',
+      invoice_id: payment.invoice_id || '',
+      order_id: payment.order_id || '',
+    });
+    setEditOpen(true);
+  };
+
+  const handleDeletePayment = async (payment: Payment) => {
+    if (!pb) return;
+    if (!confirm('Yakin ingin menghapus pembayaran ini?')) return;
+
+    try {
+      await pb.collection('payments').delete(payment.id);
+      const remaining = payments.filter((p) => p.id !== payment.id);
+      setPayments(remaining);
+      await updateRelatedRecords(payment, remaining);
+      toast.success('Pembayaran berhasil dihapus');
+    } catch (error) {
+      console.error('[v0] Delete payment error:', error);
+      toast.error('Gagal menghapus pembayaran');
+    }
+  };
+
+  const handleSaveEditPayment = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!pb || !selectedPayment) return;
+
+    if (!editForm.invoice_id && !editForm.order_id) {
+      toast.error('Pilih minimal satu: invoice atau order');
+      return;
+    }
+    if (!editForm.amount || editForm.amount <= 0) {
+      toast.error('Jumlah pembayaran harus lebih dari 0');
+      return;
+    }
+
+    try {
+      setEditSubmitting(true);
+      const payload: Partial<Payment> = {
+        payment_date: editForm.payment_date,
+        amount: editForm.amount,
+        method: editForm.method,
+        reference_number: editForm.reference_number || undefined,
+        bank_name: editForm.bank_name || undefined,
+        payment_type: editForm.payment_type,
+        notes: editForm.notes || undefined,
+      };
+
+      if (editForm.invoice_id) {
+        payload.invoice_id = editForm.invoice_id;
+      } else {
+        payload.invoice_id = undefined;
+      }
+      if (editForm.order_id) {
+        payload.order_id = editForm.order_id;
+      } else {
+        payload.order_id = undefined;
+      }
+
+      const original = selectedPayment;
+      const updated = (await pb
+        .collection('payments')
+        .update(selectedPayment.id, payload)) as Payment;
+
+      const nextPayments = payments.map((p) => (p.id === updated.id ? updated : p));
+      setPayments(nextPayments);
+
+      await updateRelatedRecords(original, nextPayments);
+      await updateRelatedRecords(updated, nextPayments);
+
+      toast.success('Pembayaran berhasil diperbarui');
+      setEditOpen(false);
+      setSelectedPayment(null);
+    } catch (error: any) {
+      console.error('[v0] Edit payment error:', error);
+      const message = getPocketBaseErrorMessage(error);
+      toast.error(message || 'Gagal memperbarui pembayaran');
+    } finally {
+      setEditSubmitting(false);
+    }
   };
 
   return (
@@ -533,6 +667,9 @@ export default function PaymentsPage() {
                     <th className="px-6 py-4 text-left text-xs font-semibold text-slate-300 uppercase">
                       Catatan
                     </th>
+                    <th className="px-6 py-4 text-right text-xs font-semibold text-slate-300 uppercase">
+                      Aksi
+                    </th>
                   </tr>
                 </thead>
                 <tbody>
@@ -588,6 +725,29 @@ export default function PaymentsPage() {
                             {payment.notes || '-'}
                           </span>
                         </td>
+                        <td className="px-6 py-3 text-right text-sm">
+                          <button
+                            type="button"
+                            onClick={() => handleOpenViewPayment(payment)}
+                            className="p-2 hover:bg-slate-800 rounded-lg text-slate-400 hover:text-slate-200 transition-colors"
+                          >
+                            <Eye size={16} />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleOpenEditPayment(payment)}
+                            className="p-2 hover:bg-slate-800 rounded-lg text-slate-400 hover:text-slate-200 transition-colors"
+                          >
+                            <Edit2 size={16} />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleDeletePayment(payment)}
+                            className="p-2 hover:bg-red-500/10 rounded-lg text-slate-400 hover:text-red-400 transition-colors"
+                          >
+                            <Trash2 size={16} />
+                          </button>
+                        </td>
                       </tr>
                     );
                   })}
@@ -597,6 +757,319 @@ export default function PaymentsPage() {
           )}
         </div>
       </div>
+
+      <Dialog open={viewOpen} onOpenChange={setViewOpen}>
+        <DialogContent className="sm:max-w-[425px] bg-slate-900 border-slate-700">
+          <DialogHeader>
+            <DialogTitle className="text-white">Detail Pembayaran</DialogTitle>
+            <DialogDescription className="text-slate-400">
+              Ringkasan informasi pembayaran.
+            </DialogDescription>
+          </DialogHeader>
+          {selectedPayment && (
+            <div className="space-y-4">
+              <div className="flex justify-between text-sm">
+                <div>
+                  <p className="text-slate-400 text-xs">Tanggal</p>
+                  <p className="text-slate-200">
+                    {formatDate(selectedPayment.payment_date)}
+                  </p>
+                </div>
+                <div className="text-right">
+                  <p className="text-slate-400 text-xs">Jumlah</p>
+                  <p className="text-white font-semibold">
+                    {formatCurrency(selectedPayment.amount)}
+                  </p>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4 text-sm">
+                <div>
+                  <p className="text-slate-400 text-xs">Metode</p>
+                  <p className="text-slate-200">
+                    {getMethodLabel(selectedPayment.method)}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-slate-400 text-xs">Jenis</p>
+                  <p className="text-slate-200">
+                    {getPaymentTypeLabel(selectedPayment.payment_type)}
+                  </p>
+                </div>
+              </div>
+
+              <div className="border-t border-slate-700 pt-3 text-sm">
+                <p className="text-slate-400 text-xs">Terkait</p>
+                <div className="mt-1 space-y-1">
+                  {getLinkedInvoice(selectedPayment) && (
+                    <p className="text-slate-200">
+                      Invoice:{' '}
+                      <span className="font-medium">
+                        {getLinkedInvoice(selectedPayment)?.invoice_number}
+                      </span>
+                    </p>
+                  )}
+                  {getLinkedOrder(selectedPayment) && (
+                    <p className="text-slate-200">
+                      Order:{' '}
+                      <span className="font-medium">
+                        {getLinkedOrder(selectedPayment)?.order_number}
+                      </span>
+                    </p>
+                  )}
+                  {!getLinkedInvoice(selectedPayment) &&
+                    !getLinkedOrder(selectedPayment) && (
+                      <p className="text-slate-500">Tidak terkait invoice atau order</p>
+                    )}
+                </div>
+              </div>
+
+              <div className="border-t border-slate-700 pt-3 text-sm">
+                <p className="text-slate-400 text-xs">Referensi</p>
+                <p className="text-slate-200">
+                  {selectedPayment.reference_number || '-'}
+                </p>
+                {selectedPayment.bank_name && (
+                  <p className="text-slate-400 text-xs mt-1">
+                    Bank: <span className="text-slate-200">{selectedPayment.bank_name}</span>
+                  </p>
+                )}
+              </div>
+
+              <div className="border-t border-slate-700 pt-3 text-sm">
+                <p className="text-slate-400 text-xs">Catatan</p>
+                <p className="text-slate-200 whitespace-pre-line">
+                  {selectedPayment.notes || '-'}
+                </p>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={editOpen}
+        onOpenChange={(open) => {
+          setEditOpen(open);
+          if (!open) {
+            setSelectedPayment(null);
+          }
+        }}
+      >
+        <DialogContent className="sm:max-w-[425px] bg-slate-900 border-slate-700">
+          <DialogHeader>
+            <DialogTitle className="text-white">Edit Pembayaran</DialogTitle>
+            <DialogDescription className="text-slate-400">
+              Perbarui informasi pembayaran.
+            </DialogDescription>
+          </DialogHeader>
+          {selectedPayment && (
+            <form onSubmit={handleSaveEditPayment} className="space-y-4 mt-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-slate-300 mb-2">
+                    Tanggal Pembayaran *
+                  </label>
+                  <Input
+                    type="date"
+                    value={editForm.payment_date}
+                    onChange={(e) =>
+                      setEditForm((prev) => ({
+                        ...prev,
+                        payment_date: e.target.value,
+                      }))
+                    }
+                    className="bg-slate-800 border-slate-700 text-white"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-300 mb-2">
+                    Metode Pembayaran *
+                  </label>
+                  <select
+                    value={editForm.method}
+                    onChange={(e) =>
+                      setEditForm((prev) => ({
+                        ...prev,
+                        method: e.target.value as Payment['method'],
+                      }))
+                    }
+                    className="w-full bg-slate-800 border border-slate-700 rounded-md px-3 py-2 text-sm text-slate-100"
+                  >
+                    <option value="cash">Tunai</option>
+                    <option value="transfer_bank">Transfer Bank</option>
+                    <option value="qris">QRIS</option>
+                    <option value="giro">Giro</option>
+                    <option value="cheque">Cek</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-slate-300 mb-2">
+                    Jenis Pembayaran *
+                  </label>
+                  <select
+                    value={editForm.payment_type}
+                    onChange={(e) =>
+                      setEditForm((prev) => ({
+                        ...prev,
+                        payment_type: e.target.value as Payment['payment_type'],
+                      }))
+                    }
+                    className="w-full bg-slate-800 border-slate-700 rounded-md px-3 py-2 text-sm text-slate-100"
+                  >
+                    <option value="down_payment">DP</option>
+                    <option value="installment">Cicilan</option>
+                    <option value="full_payment">Pelunasan</option>
+                    <option value="refund">Refund</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-300 mb-2">
+                    Jumlah Pembayaran (Rp) *
+                  </label>
+                  <Input
+                    type="number"
+                    min={0}
+                    value={editForm.amount || ''}
+                    onChange={(e) =>
+                      setEditForm((prev) => ({
+                        ...prev,
+                        amount: Number(e.target.value) || 0,
+                      }))
+                    }
+                    className="bg-slate-800 border-slate-700 text-white"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-slate-300 mb-2">
+                    Invoice (opsional)
+                  </label>
+                  <select
+                    value={editForm.invoice_id}
+                    onChange={(e) =>
+                      setEditForm((prev) => ({
+                        ...prev,
+                        invoice_id: e.target.value,
+                      }))
+                    }
+                    className="w-full bg-slate-800 border border-slate-700 rounded-md px-3 py-2 text-sm text-slate-100"
+                  >
+                    <option value="">Pilih invoice...</option>
+                    {invoices.map((invoice) => (
+                      <option key={invoice.id} value={invoice.id}>
+                        {invoice.invoice_number} - {formatCurrency(invoice.total_amount)}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-300 mb-2">
+                    Order (opsional)
+                  </label>
+                  <select
+                    value={editForm.order_id}
+                    onChange={(e) =>
+                      setEditForm((prev) => ({
+                        ...prev,
+                        order_id: e.target.value,
+                      }))
+                    }
+                    className="w-full bg-slate-800 border border-slate-700 rounded-md px-3 py-2 text-sm text-slate-100"
+                  >
+                    <option value="">Pilih order...</option>
+                    {orders.map((order) => (
+                      <option key={order.id} value={order.id}>
+                        {order.order_number} - {formatCurrency(order.total || 0)}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-slate-300 mb-2">
+                    No Referensi
+                  </label>
+                  <Input
+                    placeholder="No rekening, ID transaksi, dll"
+                    value={editForm.reference_number}
+                    onChange={(e) =>
+                      setEditForm((prev) => ({
+                        ...prev,
+                        reference_number: e.target.value,
+                      }))
+                    }
+                    className="bg-slate-800 border-slate-700 text-white"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-300 mb-2">
+                    Nama Bank
+                  </label>
+                  <Input
+                    placeholder="Nama bank (jika transfer)"
+                    value={editForm.bank_name}
+                    onChange={(e) =>
+                      setEditForm((prev) => ({
+                        ...prev,
+                        bank_name: e.target.value,
+                      }))
+                    }
+                    className="bg-slate-800 border-slate-700 text-white"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-slate-300 mb-2">
+                  Catatan
+                </label>
+                <textarea
+                  rows={3}
+                  value={editForm.notes}
+                  onChange={(e) =>
+                    setEditForm((prev) => ({
+                      ...prev,
+                      notes: e.target.value,
+                    }))
+                  }
+                  className="w-full bg-slate-800 border border-slate-700 rounded-md px-3 py-2 text-sm text-slate-100 resize-none"
+                  placeholder="Catatan tambahan (opsional)"
+                />
+              </div>
+
+              <div className="flex justify-end gap-2 pt-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setEditOpen(false)}
+                  className="border-slate-600 text-slate-200 hover:bg-slate-800"
+                  disabled={editSubmitting}
+                >
+                  Batal
+                </Button>
+                <Button
+                  type="submit"
+                  className="bg-orange-500 hover:bg-orange-600 text-white"
+                  disabled={editSubmitting}
+                >
+                  {editSubmitting && (
+                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  )}
+                  Simpan
+                </Button>
+              </div>
+            </form>
+          )}
+        </DialogContent>
+      </Dialog>
     </MainLayout>
   );
 }

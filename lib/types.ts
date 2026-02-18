@@ -172,3 +172,14 @@ export interface DashboardStats {
   monthlyRevenue: Array<{ month: string; amount: number }>;
   recentOrders: Order[];
 }
+
+// Cash Register Sessions
+export interface CashRegisterSession extends BaseRecord {
+  user_id: string;
+  open_time: string;
+  close_time?: string;
+  opening_balance: number;
+  closing_balance?: number;
+  status: 'open' | 'closed';
+  notes?: string;
+}

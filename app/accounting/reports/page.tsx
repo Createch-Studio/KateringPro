@@ -3,10 +3,11 @@
 import { useEffect, useMemo, useState } from 'react';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { useAuth } from '@/lib/auth-context';
-import { formatCurrency } from '@/lib/api';
+import { fetchWithError, formatCurrency, getPocketBaseErrorMessage } from '@/lib/api';
 import { Account, Expense, Invoice, JournalEntry, Payment } from '@/lib/types';
 import { Input } from '@/components/ui/input';
 import { Calendar, Loader2 } from 'lucide-react';
+import { toast } from 'sonner';
 
 type ReportRange = 'month' | 'quarter' | 'year' | 'custom';
 
@@ -37,32 +38,79 @@ export default function AccountingReportsPage() {
       try {
         setLoading(true);
 
-        const [invoicesRes, paymentsRes, expensesRes, accountsRes, journalRes] = await Promise.all([
-          pb.collection('invoices').getList(1, 200, {
-            sort: '-invoice_date',
-          }),
-          pb.collection('payments').getList(1, 200, {
-            sort: '-payment_date',
-          }),
-          pb.collection('expenses').getList(1, 200, {
-            sort: '-expense_date',
-            filter: 'is_deleted = false || is_deleted = ""',
-          }),
-          pb.collection('chart_of_accounts').getList(1, 200, {
-            sort: 'code',
-          }),
-          pb.collection('journal_entries').getList(1, 500, {
-            sort: '-entry_date',
-          }),
-        ]);
+        const [invoicesRes, paymentsRes, expensesRes, accountsRes, journalRes] =
+          await Promise.all([
+            fetchWithError(
+              () =>
+                pb.collection('invoices').getList(1, 200, {
+                  sort: '-invoice_date',
+                }),
+              'Gagal memuat invoice'
+            ),
+            fetchWithError(
+              () =>
+                pb.collection('payments').getList(1, 200, {
+                  sort: '-payment_date',
+                }),
+              'Gagal memuat pembayaran'
+            ),
+            fetchWithError(
+              () =>
+                pb.collection('expenses').getList(1, 200, {
+                  sort: '-expense_date',
+                }),
+              'Gagal memuat pengeluaran'
+            ),
+            fetchWithError(
+              () =>
+                pb.collection('chart_of_accounts').getList(1, 200, {
+                  sort: 'code',
+                }),
+              'Gagal memuat chart of accounts'
+            ),
+            fetchWithError(
+              () =>
+                pb.collection('journal_entries').getList(1, 500, {
+                  sort: '-entry_date',
+                }),
+              'Gagal memuat jurnal'
+            ),
+          ]);
 
-        setInvoices(invoicesRes.items as Invoice[]);
-        setPayments(paymentsRes.items as Payment[]);
-        setExpenses(expensesRes.items as Expense[]);
-        setAccounts(accountsRes.items as Account[]);
-        setJournalEntries(journalRes.items as JournalEntry[]);
+        const firstError =
+          invoicesRes.error ||
+          paymentsRes.error ||
+          expensesRes.error ||
+          accountsRes.error ||
+          journalRes.error;
+
+        if (firstError) {
+          const message = firstError || 'Gagal memuat data laporan akuntansi';
+          toast.error(message);
+        }
+
+        setInvoices(
+          ((invoicesRes.data as any)?.items as Invoice[]) || []
+        );
+        setPayments(
+          ((paymentsRes.data as any)?.items as Payment[]) || []
+        );
+        setExpenses(
+          ((expensesRes.data as any)?.items as Expense[]) || []
+        );
+        setAccounts(
+          ((accountsRes.data as any)?.items as Account[]) || []
+        );
+        setJournalEntries(
+          ((journalRes.data as any)?.items as JournalEntry[]) || []
+        );
       } catch (error) {
+        const message = getPocketBaseErrorMessage(
+          error,
+          'Terjadi kesalahan saat memuat laporan akuntansi'
+        );
         console.error('[v0] Accounting reports fetch error:', error);
+        toast.error(message);
       } finally {
         setLoading(false);
       }

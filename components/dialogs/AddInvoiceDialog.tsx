@@ -12,8 +12,7 @@ import {
 import { Plus } from 'lucide-react';
 import { toast } from 'sonner';
 import { Invoice, Order } from '@/lib/types';
-import { formatCurrency } from '@/lib/api';
-import { getPocketBaseErrorMessage } from '@/lib/api';
+import { formatCurrency, getPocketBaseErrorMessage, syncInvoiceRevenueJournal } from '@/lib/api';
 
 interface AddInvoiceDialogProps {
   pb: any;
@@ -105,8 +104,8 @@ export function AddInvoiceDialog({ pb, orders, onInvoiceAdded }: AddInvoiceDialo
         payload.notes = formData.notes.trim();
       }
 
-      const newInvoice = await pb.collection('invoices').create(payload);
-
+      const newInvoice = (await pb.collection('invoices').create(payload)) as Invoice;
+      await syncInvoiceRevenueJournal(pb, newInvoice);
       onInvoiceAdded(newInvoice);
       toast.success('Invoice berhasil dibuat');
       setOpen(false);

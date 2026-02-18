@@ -14,7 +14,7 @@ import {
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { toast } from 'sonner';
-import { formatCurrency, formatDate } from '@/lib/api';
+import { formatCurrency, formatDate, syncInvoiceRevenueJournal } from '@/lib/api';
 import { Customer, Invoice, Order } from '@/lib/types';
 import { AddInvoiceDialog } from '@/components/dialogs/AddInvoiceDialog';
 
@@ -102,6 +102,16 @@ export default function InvoicesPage() {
     if (!confirm('Yakin ingin menghapus invoice ini?')) return;
 
     try {
+      const existing = await pb.collection('journal_entries').getList(1, 50, {
+        filter: `source = "system" && reference = "${id}"`,
+      });
+      if (existing.items.length) {
+        await Promise.all(
+          existing.items.map((entry: any) =>
+            pb.collection('journal_entries').delete(entry.id)
+          )
+        );
+      }
       await pb.collection('invoices').delete(id);
       setInvoices(invoices.filter((inv) => inv.id !== id));
       toast.success('Invoice berhasil dihapus');
@@ -179,6 +189,7 @@ export default function InvoicesPage() {
         .collection('invoices')
         .update(selectedInvoice.id, payload)) as Invoice;
 
+      await syncInvoiceRevenueJournal(pb, updated);
       setInvoices((prev) => prev.map((inv) => (inv.id === updated.id ? updated : inv)));
       toast.success('Invoice berhasil diperbarui');
       setEditOpen(false);

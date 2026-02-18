@@ -19,13 +19,19 @@ import {
   BookMarked,
   BarChart3,
   UserCircle2,
+  Monitor,
+  Wallet2,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 const menuItems = [
   {
     group: 'Utama',
-    items: [{ icon: LayoutDashboard, label: 'Dashboard', href: '/dashboard' }],
+    items: [
+      { icon: LayoutDashboard, label: 'Dashboard', href: '/dashboard' },
+      { icon: Monitor, label: 'PoS (Point of Sale)', href: '/pos' },
+      { icon: Wallet2, label: 'Cash Register', href: '/cash-register' },
+    ],
   },
   {
     group: 'Penjualan',

@@ -31,8 +31,6 @@ interface OrderItemRow {
 }
 
 export function EditOrderDialog({ pb, order, customers, onOrderUpdated }: EditOrderDialogProps) {
-  const createdDate = new Date(order.created).toISOString().split('T')[0];
-
   const getDateOnly = (value: string | undefined, fallback: string) => {
     if (!value) return fallback;
     let v = value;
@@ -46,6 +44,9 @@ export function EditOrderDialog({ pb, order, customers, onOrderUpdated }: EditOr
     }
     return v;
   };
+
+  const createdDateFallback = new Date().toISOString().split('T')[0];
+  const createdDate = getDateOnly(order.created, createdDateFallback);
 
   const initialOrderDate = getDateOnly(order.order_date, createdDate);
   const initialEventDate = getDateOnly(order.event_date, createdDate);

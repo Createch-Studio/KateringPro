@@ -6,7 +6,7 @@ import { MainLayout } from '@/components/layout/MainLayout';
 import { StatCard } from '@/components/dashboard/StatCard';
 import { RecentOrders } from '@/components/dashboard/RecentOrders';
 import { TrendChart } from '@/components/dashboard/TrendChart';
-import { Order, DashboardStats } from '@/lib/types';
+import { Order, DashboardStats, Payment } from '@/lib/types';
 import { DollarSign, ShoppingCart, Clock, CheckCircle } from 'lucide-react';
 
 export default function DashboardPage() {
@@ -28,26 +28,29 @@ export default function DashboardPage() {
       try {
         setLoading(true);
 
-        // Fetch orders
         const ordersRes = await pb.collection('orders').getList(1, 50, {
           sort: '-order_date',
         });
 
-        // Fetch invoices
         const invoicesRes = await pb.collection('invoices').getList(1, 100);
 
-        // Calculate stats
-        const totalOrders = ordersRes.total;
+        const paymentsRes = await pb.collection('payments').getList(1, 500, {
+          sort: '-payment_date',
+        });
+
+        const totalOrders = (ordersRes as any).totalItems ?? ordersRes.items.length;
         const completedOrders = ordersRes.items.filter(
           (o: any) => o.status === 'completed'
         ).length;
-        const totalRevenue = (ordersRes.items as Order[]).reduce(
-          (sum, order) => sum + (order.total || 0),
-          0
-        );
+        const totalRevenue = (paymentsRes.items as Payment[]).reduce((sum, payment) => {
+          if (payment.payment_type === 'refund') {
+            return sum - (payment.amount || 0);
+          }
+          return sum + (payment.amount || 0);
+        }, 0);
 
-        const pendingPayments = invoicesRes.items.filter(
-          (inv: any) => inv.status === 'sent' || inv.status === 'overdue'
+        const pendingPayments = invoicesRes.items.filter((inv: any) =>
+          ['sent', 'overdue', 'partial'].includes(inv.status)
         ).length;
 
         const monthlyData: { [key: string]: { amount: number; date: Date } } = {};
