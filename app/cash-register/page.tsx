@@ -3,19 +3,37 @@
 import { useEffect, useState } from 'react';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { useAuth } from '@/lib/auth-context';
-import { CashRegisterSession } from '@/lib/types';
+import { CashRegisterSession, Payment } from '@/lib/types';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import { formatCurrency, formatDateTime, getPocketBaseErrorMessage } from '@/lib/api';
 import { toast } from 'sonner';
 
 export default function CashRegisterPage() {
-  const { pb, user, isAuthenticated, isViewOnlyRole } = useAuth();
+  const { pb, user, isAuthenticated, isViewOnlyRole, employee } = useAuth();
   const [session, setSession] = useState<CashRegisterSession | null>(null);
   const [loading, setLoading] = useState(true);
   const [openingBalance, setOpeningBalance] = useState<number>(0);
-  const [closingBalance, setClosingBalance] = useState<number>(0);
   const [saving, setSaving] = useState(false);
+  const [history, setHistory] = useState<CashRegisterSession[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyPage, setHistoryPage] = useState(1);
+  const [historyTotalPages, setHistoryTotalPages] = useState(1);
+  const [closeDialogOpen, setCloseDialogOpen] = useState(false);
+  const [actualCash, setActualCash] = useState<number>(0);
+  const [expectedCash, setExpectedCash] = useState<number>(0);
+  const [expectedLoading, setExpectedLoading] = useState(false);
+  const [closeNote, setCloseNote] = useState('');
+
+  const isAdmin = employee?.role === 'admin';
+  const openedByLabel = employee?.name || user?.email || '-';
 
   useEffect(() => {
     const fetchSession = async () => {
@@ -32,9 +50,6 @@ export default function CashRegisterPage() {
         });
         const current = res.items[0] || null;
         setSession(current);
-        if (current) {
-          setClosingBalance(current.opening_balance);
-        }
       } catch (error: any) {
         const message = getPocketBaseErrorMessage(error, 'Gagal memuat status cash register');
         console.error('[v0] Fetch cash register session error:', message);
@@ -46,6 +61,35 @@ export default function CashRegisterPage() {
 
     fetchSession();
   }, [pb, user, isAuthenticated]);
+
+  useEffect(() => {
+    const fetchHistory = async () => {
+      if (!pb || !user || !isAuthenticated) return;
+
+      try {
+        setHistoryLoading(true);
+        const res = await pb
+          .collection('cash_register_sessions')
+          .getList<CashRegisterSession>(historyPage, 10, {
+            filter: `user_id = "${user.id}"`,
+            sort: '-open_time',
+          });
+        setHistory(res.items);
+        setHistoryTotalPages(res.totalPages || 1);
+      } catch (error: any) {
+        const message = getPocketBaseErrorMessage(
+          error,
+          'Gagal memuat histori cash register'
+        );
+        console.error('[v0] Fetch cash register history error:', message);
+        toast.error(message);
+      } finally {
+        setHistoryLoading(false);
+      }
+    };
+
+    fetchHistory();
+  }, [pb, user, isAuthenticated, historyPage]);
 
   const handleOpen = async () => {
     if (isViewOnlyRole) {
@@ -68,7 +112,6 @@ export default function CashRegisterPage() {
         status: 'open',
       })) as CashRegisterSession;
       setSession(created);
-      setClosingBalance(created.opening_balance);
       toast.success('Cash register berhasil dibuka');
     } catch (error: any) {
       const message = getPocketBaseErrorMessage(error, 'Gagal membuka cash register');
@@ -79,14 +122,63 @@ export default function CashRegisterPage() {
     }
   };
 
-  const handleClose = async () => {
+  const handleCloseClick = async () => {
     if (isViewOnlyRole) {
       toast.error('Role Anda hanya dapat melihat data dan tidak bisa menutup cash register');
       return;
     }
-    if (!pb || !session) return;
-    if (closingBalance < 0) {
+    if (!pb || !session || !user) return;
+
+    const isOpener = session.user_id === user.id;
+    if (!isAdmin && !isOpener) {
+      toast.error('Cash register hanya bisa ditutup oleh pembuka atau admin');
+      return;
+    }
+
+    try {
+      setExpectedLoading(true);
+      let totalCash = 0;
+
+      const res = await pb
+        .collection('payments')
+        .getList<Payment>(1, 500, {
+          filter: `session_id = "${session.id}" && method = "cash"`,
+        });
+
+      totalCash = res.items.reduce((sum, p) => sum + (p.amount || 0), 0);
+
+      const calculatedExpected = (session.opening_balance || 0) + totalCash;
+      setExpectedCash(calculatedExpected);
+      setActualCash(calculatedExpected);
+    } catch (error: any) {
+      console.error('[v0] Calculate expected cash error (fallback to opening balance):', error);
+      setExpectedCash(session.opening_balance || 0);
+      setActualCash(session.opening_balance || 0);
+    } finally {
+      setExpectedLoading(false);
+    }
+
+    setCloseDialogOpen(true);
+  };
+
+  const handleConfirmClose = async () => {
+    if (isViewOnlyRole) {
+      toast.error('Role Anda hanya dapat melihat data dan tidak bisa menutup cash register');
+      return;
+    }
+    if (!pb || !session || !user) return;
+
+    const isOpener = session.user_id === user.id;
+    if (!isAdmin && !isOpener) {
+      toast.error('Cash register hanya bisa ditutup oleh pembuka atau admin');
+      return;
+    }
+    if (actualCash < 0) {
       toast.error('Saldo akhir tidak boleh negatif');
+      return;
+    }
+    if (!closeNote.trim()) {
+      toast.error('Catatan penutupan cash register wajib diisi');
       return;
     }
 
@@ -95,10 +187,14 @@ export default function CashRegisterPage() {
       const now = new Date().toISOString();
       const updated = (await pb.collection('cash_register_sessions').update(session.id, {
         close_time: now,
-        closing_balance: closingBalance,
+        closing_balance: actualCash,
+        notes: closeNote.trim(),
         status: 'closed',
       })) as CashRegisterSession;
       setSession(null);
+      setCloseDialogOpen(false);
+      setActualCash(0);
+      setCloseNote('');
       toast.success('Cash register berhasil ditutup');
     } catch (error: any) {
       const message = getPocketBaseErrorMessage(error, 'Gagal menutup cash register');
@@ -183,36 +279,240 @@ export default function CashRegisterPage() {
               <div className="bg-slate-800 border border-slate-700 rounded-lg p-4">
                 <p className="text-sm text-slate-200 font-semibold mb-2">Tutup cash register</p>
                 <p className="text-xs text-slate-400 mb-3">
-                  Hitung kas fisik di laci, lalu masukkan saldo akhir sebelum menutup shift.
+                  Klik tombol di bawah untuk menghitung Expected Cash dan mengisi saldo akhir
+                  aktual di dialog konfirmasi.
                 </p>
-                <div className="flex items-center gap-3">
-                  <div className="flex-1">
-                    <label className="block text-xs font-medium text-slate-400 mb-1">
-                      Saldo akhir kas (Rp)
-                    </label>
-                    <Input
-                      type="number"
-                      min={0}
-                      value={closingBalance}
-                      onChange={(e) => setClosingBalance(Number(e.target.value) || 0)}
-                      className="bg-slate-900 border-slate-700 text-white"
-                    />
-                  </div>
-                  <div className="pt-5">
-                    <Button
-                      type="button"
-                      onClick={handleClose}
-                      disabled={saving}
-                      className="bg-red-600 hover:bg-red-700 text-white"
-                    >
-                      {saving ? 'Menutup...' : 'Tutup Cash Register'}
-                    </Button>
-                  </div>
+                <div className="flex items-center justify-end">
+                  <Button
+                    type="button"
+                    onClick={handleCloseClick}
+                    disabled={
+                      saving ||
+                      !session ||
+                      (!isAdmin && session.user_id !== user?.id)
+                    }
+                    className="bg-red-600 hover:bg-red-700 text-white"
+                  >
+                    {saving ? 'Menutup...' : 'Tutup Cash Register'}
+                  </Button>
                 </div>
               </div>
             </div>
           )}
         </div>
+
+        <div className="bg-slate-900 border border-slate-700 rounded-lg p-6">
+          <h2 className="text-lg font-semibold text-white mb-4">Riwayat Cash Register</h2>
+          <p className="text-xs text-slate-400 mb-4">
+            Riwayat pembukaan dan penutupan cash register. Ditampilkan per 10 sesi, urut dari yang
+            terbaru.
+          </p>
+
+          {historyLoading ? (
+            <div className="text-slate-400 text-sm">Memuat histori cash register...</div>
+          ) : history.length === 0 ? (
+            <div className="text-slate-500 text-sm">Belum ada histori cash register.</div>
+          ) : (
+            <div className="space-y-3">
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-slate-700 bg-slate-800/50">
+                      <th className="px-4 py-3 text-left text-xs font-semibold text-slate-300 uppercase">
+                        Waktu Buka
+                      </th>
+                      <th className="px-4 py-3 text-left text-xs font-semibold text-slate-300 uppercase">
+                        Waktu Tutup
+                      </th>
+                      <th className="px-4 py-3 text-right text-xs font-semibold text-slate-300 uppercase">
+                        Saldo Awal
+                      </th>
+                      <th className="px-4 py-3 text-right text-xs font-semibold text-slate-300 uppercase">
+                        Saldo Akhir
+                      </th>
+                      <th className="px-4 py-3 text-right text-xs font-semibold text-slate-300 uppercase">
+                        Variance
+                      </th>
+                      <th className="px-4 py-3 text-left text-xs font-semibold text-slate-300 uppercase">
+                        Dibuka oleh
+                      </th>
+                      <th className="px-4 py-3 text-center text-xs font-semibold text-slate-300 uppercase">
+                        Status
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {history.map((item) => (
+                      <tr
+                        key={item.id}
+                        className="border-b border-slate-800 hover:bg-slate-800/60 transition-colors"
+                      >
+                        <td className="px-4 py-3 text-slate-200">
+                          {formatDateTime(item.open_time)}
+                        </td>
+                        <td className="px-4 py-3 text-slate-200">
+                          {item.close_time ? formatDateTime(item.close_time) : '-'}
+                        </td>
+                        <td className="px-4 py-3 text-right text-slate-200">
+                          {formatCurrency(item.opening_balance || 0)}
+                        </td>
+                        <td className="px-4 py-3 text-right text-slate-200">
+                          {item.closing_balance != null
+                            ? formatCurrency(item.closing_balance)
+                            : '-'}
+                        </td>
+                        <td className="px-4 py-3 text-right text-slate-200">
+                          {item.closing_balance != null
+                            ? formatCurrency(
+                                (item.closing_balance || 0) - (item.opening_balance || 0)
+                              )
+                            : '-'}
+                        </td>
+                        <td className="px-4 py-3 text-slate-200">
+                          {openedByLabel}
+                        </td>
+                        <td className="px-4 py-3 text-center">
+                          <span
+                            className={`inline-flex px-2 py-1 text-xs rounded-full font-medium ${
+                              item.status === 'open'
+                                ? 'bg-green-500/10 text-green-400'
+                                : 'bg-slate-600/20 text-slate-200'
+                            }`}
+                          >
+                            {item.status === 'open'
+                              ? `Terbuka oleh ${openedByLabel}`
+                              : `Ditutup oleh ${openedByLabel}`}
+                          </span>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              <div className="flex items-center justify-between pt-1">
+                <p className="text-xs text-slate-400">
+                  Halaman <span className="font-semibold text-slate-200">{historyPage}</span> dari{' '}
+                  <span className="font-semibold text-slate-200">{historyTotalPages}</span>
+                </p>
+                <div className="flex gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    disabled={historyPage <= 1 || historyLoading}
+                    onClick={() => setHistoryPage((p) => Math.max(1, p - 1))}
+                    className="border-slate-700 text-slate-200 hover:text-white"
+                  >
+                    Sebelumnya
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    disabled={historyPage >= historyTotalPages || historyLoading}
+                    onClick={() =>
+                      setHistoryPage((p) =>
+                        historyTotalPages > 0 ? Math.min(historyTotalPages, p + 1) : p + 1
+                      )
+                    }
+                    className="border-slate-700 text-slate-200 hover:text-white"
+                  >
+                    Berikutnya
+                  </Button>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+
+        <Dialog open={closeDialogOpen} onOpenChange={setCloseDialogOpen}>
+          <DialogContent className="sm:max-w-[420px] bg-slate-900 border border-slate-700">
+            <DialogHeader>
+              <DialogTitle className="text-white">Konfirmasi Tutup Cash Register</DialogTitle>
+              <DialogDescription className="text-slate-400">
+                Periksa saldo kas dan isi saldo akhir aktual sebelum menutup cash register.
+              </DialogDescription>
+            </DialogHeader>
+
+            {session && (
+              <div className="space-y-4 mt-2">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
+                  <div className="bg-slate-800/60 border border-slate-700 rounded p-3">
+                    <p className="text-xs text-slate-400 mb-1">Opening Balance</p>
+                    <p className="text-base font-semibold text-slate-100">
+                      {formatCurrency(session.opening_balance || 0)}
+                    </p>
+                  </div>
+                  <div className="bg-slate-800/60 border border-slate-700 rounded p-3">
+                    <p className="text-xs text-slate-400 mb-1">Expected Cash</p>
+                    <p className="text-base font-semibold text-orange-400">
+                      {expectedLoading
+                        ? 'Menghitung...'
+                        : formatCurrency(expectedCash)}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <p className="text-sm font-medium text-slate-200">Actual Cash Count</p>
+                  <Input
+                    type="number"
+                    min={0}
+                    value={actualCash}
+                    onChange={(e) => setActualCash(Number(e.target.value) || 0)}
+                    className="bg-slate-800 border-slate-700 text-white"
+                  />
+                </div>
+
+                <div className="bg-slate-800/60 border border-slate-700 rounded p-3">
+                  <p className="text-xs text-slate-400 mb-1">Variance (Actual - Expected)</p>
+                  <p
+                    className={`text-base font-semibold ${
+                      actualCash - expectedCash === 0
+                        ? 'text-green-400'
+                        : actualCash - expectedCash > 0
+                          ? 'text-orange-400'
+                          : 'text-red-400'
+                    }`}
+                  >
+                    {formatCurrency(actualCash - expectedCash)}
+                  </p>
+                </div>
+
+                <div className="space-y-2">
+                  <p className="text-sm font-medium text-slate-200">
+                    Catatan Penutupan (wajib)
+                  </p>
+                  <Input
+                    value={closeNote}
+                    onChange={(e) => setCloseNote(e.target.value)}
+                    placeholder="Contoh: Selisih karena uang kembalian, dll."
+                    className="bg-slate-800 border-slate-700 text-white"
+                  />
+                </div>
+
+                <div className="flex justify-end gap-3 pt-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => setCloseDialogOpen(false)}
+                    disabled={saving}
+                    className="border-slate-700 text-slate-300 hover:text-white"
+                  >
+                    Batal
+                  </Button>
+                  <Button
+                    type="button"
+                    onClick={handleConfirmClose}
+                    disabled={saving}
+                    className="bg-red-600 hover:bg-red-700 text-white"
+                  >
+                    {saving ? 'Menutup...' : 'Konfirmasi & Tutup'}
+                  </Button>
+                </div>
+              </div>
+            )}
+          </DialogContent>
+        </Dialog>
       </div>
     </MainLayout>
   );

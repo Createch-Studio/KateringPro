@@ -114,6 +114,7 @@ export interface Invoice extends BaseRecord {
 export interface Payment extends BaseRecord {
   invoice_id?: string;
   order_id?: string;
+  session_id?: string;
   payment_date: string;
   amount: number;
   method: 'cash' | 'transfer_bank' | 'qris' | 'giro' | 'cheque';
@@ -183,6 +184,14 @@ export interface Employee extends BaseRecord {
   join_date?: string;
   note?: string;
   notes?: string;
+}
+
+// Role-based permissions
+export type EmployeeRole = Employee['role'];
+
+export interface RolePermission extends BaseRecord {
+  role: EmployeeRole;
+  permissions: string[];
 }
 
 // Dashboard Stats

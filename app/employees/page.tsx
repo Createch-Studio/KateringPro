@@ -1,3 +1,5 @@
+'use client';
+
 import { useEffect, useMemo, useState } from 'react';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { useAuth } from '@/lib/auth-context';
@@ -47,6 +49,8 @@ export default function EmployeesPage() {
     join_date: new Date().toISOString().split('T')[0],
     note: '',
   });
+
+  const isViewOnly = isViewOnlyRole;
 
   useEffect(() => {
     if (!pb || !isAuthenticated) {
