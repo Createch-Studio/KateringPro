@@ -25,6 +25,10 @@ export default function PaymentsPage() {
   const [orders, setOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
+  const [page, setPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
+  const [startDate, setStartDate] = useState('');
+  const [endDate, setEndDate] = useState('');
   const [addOpen, setAddOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [viewOpen, setViewOpen] = useState(false);
@@ -68,46 +72,59 @@ export default function PaymentsPage() {
     return v;
   };
 
-  const updateRelatedRecords = async (payment: Payment, allPayments: Payment[]) => {
+  const updateRelatedRecords = async (payment: Payment) => {
     if (!pb) return;
 
     if (payment.invoice_id) {
       const currentInvoice = invoices.find((inv) => inv.id === payment.invoice_id);
       if (currentInvoice) {
-        const invoicePayments = allPayments.filter((p) => p.invoice_id === payment.invoice_id);
-        const totalPaid = invoicePayments.reduce((sum, p) => sum + (p.amount || 0), 0);
-        const totalAmount =
-          (currentInvoice as any).total_amount ??
-          (currentInvoice as any).amount ??
-          currentInvoice.total_amount ??
-          currentInvoice.amount ??
-          0;
+        try {
+          const invoicePaymentsRes = await pb
+            .collection('payments')
+            .getList<Payment>(1, 500, {
+              filter: `invoice_id = "${payment.invoice_id}"`,
+            });
 
-        if (totalAmount > 0) {
-          let nextStatus = currentInvoice.status;
-          if (totalPaid <= 0) {
-            if (currentInvoice.status === 'paid' || currentInvoice.status === 'partial') {
-              nextStatus = 'sent';
-            }
-          } else if (totalPaid >= totalAmount) {
-            nextStatus = 'paid';
-          } else if (totalPaid > 0 && totalPaid < totalAmount) {
-            nextStatus =
-              currentInvoice.status === 'overdue' ? currentInvoice.status : 'partial';
-          }
+          const totalPaid = invoicePaymentsRes.items.reduce(
+            (sum, p) => sum + (p.amount || 0),
+            0
+          );
 
-          if (nextStatus !== currentInvoice.status) {
-            try {
-              const updated = (await pb
-                .collection('invoices')
-                .update(currentInvoice.id, { status: nextStatus })) as Invoice;
-              setInvoices((prev) =>
-                prev.map((inv) => (inv.id === updated.id ? updated : inv))
-              );
-            } catch (error) {
-              console.error('[v0] Update invoice status error:', error);
+          const totalAmount =
+            (currentInvoice as any).total_amount ??
+            (currentInvoice as any).amount ??
+            currentInvoice.total_amount ??
+            currentInvoice.amount ??
+            0;
+
+          if (totalAmount > 0) {
+            let nextStatus = currentInvoice.status;
+            if (totalPaid <= 0) {
+              if (currentInvoice.status === 'paid' || currentInvoice.status === 'partial') {
+                nextStatus = 'sent';
+              }
+            } else if (totalPaid >= totalAmount) {
+              nextStatus = 'paid';
+            } else if (totalPaid > 0 && totalPaid < totalAmount) {
+              nextStatus =
+                currentInvoice.status === 'overdue' ? currentInvoice.status : 'partial';
+            }
+
+            if (nextStatus !== currentInvoice.status) {
+              try {
+                const updated = (await pb
+                  .collection('invoices')
+                  .update(currentInvoice.id, { status: nextStatus })) as Invoice;
+                setInvoices((prev) =>
+                  prev.map((inv) => (inv.id === updated.id ? updated : inv))
+                );
+              } catch (error) {
+                console.error('[v0] Update invoice status error:', error);
+              }
             }
           }
+        } catch (error) {
+          console.error('[v0] Fetch payments for invoice status error:', error);
         }
       }
     }
@@ -115,35 +132,44 @@ export default function PaymentsPage() {
     if (payment.order_id) {
       const currentOrder = orders.find((o) => o.id === payment.order_id);
       if (currentOrder) {
-        const orderPayments = allPayments.filter((p) => p.order_id === payment.order_id);
-        const totalPaid = orderPayments.reduce((sum, p) => {
-          if (p.payment_type === 'refund') {
-            return sum - (p.amount || 0);
-          }
-          return sum + (p.amount || 0);
-        }, 0);
-
-        const payload: any = {
-          paid_amount: totalPaid,
-        };
-
-        if ((currentOrder.total || 0) > 0 && totalPaid >= (currentOrder.total || 0)) {
-          payload.status = 'completed';
-        } else if (
-          (currentOrder.total || 0) > 0 &&
-          totalPaid < (currentOrder.total || 0) &&
-          currentOrder.status === 'completed'
-        ) {
-          payload.status = 'confirmed';
-        }
-
         try {
-          const updated = (await pb
-            .collection('orders')
-            .update(currentOrder.id, payload)) as Order;
-          setOrders((prev) => prev.map((o) => (o.id === updated.id ? updated : o)));
+          const orderPaymentsRes = await pb
+            .collection('payments')
+            .getList<Payment>(1, 500, {
+              filter: `order_id = "${payment.order_id}"`,
+            });
+
+          const totalPaid = orderPaymentsRes.items.reduce((sum, p) => {
+            if (p.payment_type === 'refund') {
+              return sum - (p.amount || 0);
+            }
+            return sum + (p.amount || 0);
+          }, 0);
+
+          const payload: any = {
+            paid_amount: totalPaid,
+          };
+
+          if ((currentOrder.total || 0) > 0 && totalPaid >= (currentOrder.total || 0)) {
+            payload.status = 'completed';
+          } else if (
+            (currentOrder.total || 0) > 0 &&
+            totalPaid < (currentOrder.total || 0) &&
+            currentOrder.status === 'completed'
+          ) {
+            payload.status = 'confirmed';
+          }
+
+          try {
+            const updated = (await pb
+              .collection('orders')
+              .update(currentOrder.id, payload)) as Order;
+            setOrders((prev) => prev.map((o) => (o.id === updated.id ? updated : o)));
+          } catch (error) {
+            console.error('[v0] Update order status error:', error);
+          }
         } catch (error) {
-          console.error('[v0] Update order status error:', error);
+          console.error('[v0] Fetch payments for order status error:', error);
         }
       }
     }
@@ -158,14 +184,29 @@ export default function PaymentsPage() {
     const fetchData = async () => {
       try {
         setLoading(true);
+
+        const filters: string[] = [];
+        if (startDate) {
+          filters.push(`payment_date >= "${startDate} 00:00:00"`);
+        }
+        if (endDate) {
+          filters.push(`payment_date <= "${endDate} 23:59:59"`);
+        }
+
+        const paymentOptions: any = {
+          sort: '-payment_date',
+        };
+
+        if (filters.length > 0) {
+          paymentOptions.filter = filters.join(' && ');
+        }
+
         const [paymentsRes, invoicesRes, ordersRes] = await Promise.all([
-          pb.collection('payments').getList(1, 200, {
-            sort: '-payment_date',
-          }),
-          pb.collection('invoices').getList(1, 200, {
+          pb.collection('payments').getList<Payment>(page, 10, paymentOptions),
+          pb.collection('invoices').getList<Invoice>(1, 200, {
             sort: '-invoice_date',
           }),
-          pb.collection('orders').getList(1, 200, {
+          pb.collection('orders').getList<Order>(1, 200, {
             sort: '-order_date',
           }),
         ]);
@@ -173,6 +214,7 @@ export default function PaymentsPage() {
         setPayments(paymentsRes.items as Payment[]);
         setInvoices(invoicesRes.items as Invoice[]);
         setOrders(ordersRes.items as Order[]);
+        setTotalPages(paymentsRes.totalPages || 1);
       } catch (error) {
         console.error('[v0] Payments fetch error:', error);
         toast.error('Gagal memuat data pembayaran');
@@ -182,7 +224,7 @@ export default function PaymentsPage() {
     };
 
     fetchData();
-  }, [pb, isAuthenticated]);
+  }, [pb, isAuthenticated, page, startDate, endDate]);
 
   const filteredPayments = useMemo(() => {
     const term = search.toLowerCase();
@@ -278,10 +320,9 @@ export default function PaymentsPage() {
       }
 
       const created = (await pb.collection('payments').create(payload)) as Payment;
-      const nextPayments = [created, ...payments];
-      setPayments(nextPayments);
-
-      await updateRelatedRecords(created, nextPayments);
+      setPayments((prev) => [created, ...prev]);
+      await updateRelatedRecords(created);
+      setPage(1);
       toast.success('Pembayaran berhasil dicatat');
       setAddOpen(false);
     } catch (error: any) {
@@ -340,7 +381,7 @@ export default function PaymentsPage() {
       await pb.collection('payments').delete(payment.id);
       const remaining = payments.filter((p) => p.id !== payment.id);
       setPayments(remaining);
-      await updateRelatedRecords(payment, remaining);
+      await updateRelatedRecords(payment);
       toast.success('Pembayaran berhasil dihapus');
     } catch (error) {
       console.error('[v0] Delete payment error:', error);
@@ -396,8 +437,8 @@ export default function PaymentsPage() {
       const nextPayments = payments.map((p) => (p.id === updated.id ? updated : p));
       setPayments(nextPayments);
 
-      await updateRelatedRecords(original, nextPayments);
-      await updateRelatedRecords(updated, nextPayments);
+      await updateRelatedRecords(original);
+      await updateRelatedRecords(updated);
 
       toast.success('Pembayaran berhasil diperbarui');
       setEditOpen(false);
@@ -653,6 +694,53 @@ export default function PaymentsPage() {
           </div>
         </div>
 
+        <div className="bg-slate-900 border border-slate-700 rounded-lg p-4">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div>
+              <label className="block text-xs font-medium text-slate-400 mb-1">
+                Dari Tanggal Pembayaran
+              </label>
+              <Input
+                type="date"
+                value={startDate}
+                onChange={(e) => {
+                  setStartDate(e.target.value);
+                  setPage(1);
+                }}
+                className="bg-slate-800 border-slate-700 text-white"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-slate-400 mb-1">
+                Sampai Tanggal Pembayaran
+              </label>
+              <Input
+                type="date"
+                value={endDate}
+                onChange={(e) => {
+                  setEndDate(e.target.value);
+                  setPage(1);
+                }}
+                className="bg-slate-800 border-slate-700 text-white"
+              />
+            </div>
+            <div className="flex items-end">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => {
+                  setStartDate('');
+                  setEndDate('');
+                  setPage(1);
+                }}
+                className="border-slate-700 text-slate-200 hover:bg-slate-800 w-full md:w-auto"
+              >
+                Reset Filter
+              </Button>
+            </div>
+          </div>
+        </div>
+
         <div className="bg-slate-900 border border-slate-700 rounded-lg overflow-hidden">
           {loading ? (
             <div className="p-8 text-center text-slate-400 flex items-center justify-center gap-2">
@@ -666,117 +754,163 @@ export default function PaymentsPage() {
                 : 'Tidak ada pembayaran yang cocok dengan pencarian'}
             </div>
           ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full">
-                <thead>
-                  <tr className="border-b border-slate-700 bg-slate-800/50">
-                    <th className="px-6 py-4 text-left text-xs font-semibold text-slate-300 uppercase">
-                      Tanggal
-                    </th>
-                    <th className="px-6 py-4 text-left text-xs font-semibold text-slate-300 uppercase">
-                      Referensi
-                    </th>
-                    <th className="px-6 py-4 text-left text-xs font-semibold text-slate-300 uppercase">
-                      Terkait
-                    </th>
-                    <th className="px-6 py-4 text-left text-xs font-semibold text-slate-300 uppercase">
-                      Metode
-                    </th>
-                    <th className="px-6 py-4 text-left text-xs font-semibold text-slate-300 uppercase">
-                      Jenis
-                    </th>
-                    <th className="px-6 py-4 text-right text-xs font-semibold text-slate-300 uppercase">
-                      Jumlah
-                    </th>
-                    <th className="px-6 py-4 text-left text-xs font-semibold text-slate-300 uppercase">
-                      Catatan
-                    </th>
-                    <th className="px-6 py-4 text-right text-xs font-semibold text-slate-300 uppercase">
-                      Aksi
-                    </th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filteredPayments.map((payment) => {
-                    const invoice = getLinkedInvoice(payment);
-                    const order = getLinkedOrder(payment);
-                    return (
-                      <tr
-                        key={payment.id}
-                        className="border-b border-slate-700 hover:bg-slate-800/50 transition-colors"
-                      >
-                        <td className="px-6 py-3 text-slate-200 text-sm">
-                          {formatDate(payment.payment_date)}
-                        </td>
-                        <td className="px-6 py-3 text-slate-300 text-sm">
-                          <div className="flex flex-col">
-                            <span className="font-medium">
-                              {payment.reference_number || '-'}
+            <div>
+              <div className="overflow-x-auto">
+                <table className="w-full">
+                  <thead>
+                    <tr className="border-b border-slate-700 bg-slate-800/50">
+                      <th className="px-6 py-4 text-left text-xs font-semibold text-slate-300 uppercase">
+                        Tanggal
+                      </th>
+                      <th className="px-6 py-4 text-left text-xs font-semibold text-slate-300 uppercase">
+                        Referensi
+                      </th>
+                      <th className="px-6 py-4 text-left text-xs font-semibold text-slate-300 uppercase">
+                        Terkait
+                      </th>
+                      <th className="px-6 py-4 text-left text-xs font-semibold text-slate-300 uppercase">
+                        Metode
+                      </th>
+                      <th className="px-6 py-4 text-left text-xs font-semibold text-slate-300 uppercase">
+                        Jenis
+                      </th>
+                      <th className="px-6 py-4 text-right text-xs font-semibold text-slate-300 uppercase">
+                        Jumlah
+                      </th>
+                      <th className="px-6 py-4 text-left text-xs font-semibold text-slate-300 uppercase">
+                        Catatan
+                      </th>
+                      <th className="px-6 py-4 text-right text-xs font-semibold text-slate-300 uppercase">
+                        Aksi
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredPayments.map((payment) => {
+                      const invoice = getLinkedInvoice(payment);
+                      const order = getLinkedOrder(payment);
+                      return (
+                        <tr
+                          key={payment.id}
+                          className="border-b border-slate-700 hover:bg-slate-800/50 transition-colors"
+                        >
+                          <td className="px-6 py-3 text-slate-200 text-sm">
+                            {formatDate(payment.payment_date)}
+                          </td>
+                          <td className="px-6 py-3 text-slate-300 text-sm">
+                            <div className="flex flex-col">
+                              <span className="font-medium">
+                                {payment.reference_number || '-'}
+                              </span>
+                              {payment.bank_name && (
+                                <span className="text-xs text-slate-400">
+                                  {payment.bank_name}
+                                </span>
+                              )}
+                            </div>
+                          </td>
+                          <td className="px-6 py-3 text-slate-300 text-sm">
+                            <div className="flex flex-col">
+                              {invoice && (
+                                <span>
+                                  Invoice:{' '}
+                                  <span className="font-medium">
+                                    {invoice.invoice_number}
+                                  </span>
+                                </span>
+                              )}
+                              {order && (
+                                <span>
+                                  Order:{' '}
+                                  <span className="font-medium">
+                                    {order.order_number}
+                                  </span>
+                                </span>
+                              )}
+                              {!invoice && !order && (
+                                <span className="text-slate-500">-</span>
+                              )}
+                            </div>
+                          </td>
+                          <td className="px-6 py-3 text-slate-300 text-sm">
+                            {getMethodLabel(payment.method)}
+                          </td>
+                          <td className="px-6 py-3 text-slate-300 text-sm">
+                            {getPaymentTypeLabel(payment.payment_type)}
+                          </td>
+                          <td className="px-6 py-3 text-right font-semibold text-white text-sm">
+                            {formatCurrency(payment.amount)}
+                          </td>
+                          <td className="px-6 py-3 text-slate-300 text-sm max-w-xs">
+                            <span className="line-clamp-2">
+                              {payment.notes || '-'}
                             </span>
-                            {payment.bank_name && (
-                              <span className="text-xs text-slate-400">
-                                {payment.bank_name}
-                              </span>
-                            )}
-                          </div>
-                        </td>
-                        <td className="px-6 py-3 text-slate-300 text-sm">
-                          <div className="flex flex-col">
-                            {invoice && (
-                              <span>
-                                Invoice: <span className="font-medium">{invoice.invoice_number}</span>
-                              </span>
-                            )}
-                            {order && (
-                              <span>
-                                Order: <span className="font-medium">{order.order_number}</span>
-                              </span>
-                            )}
-                            {!invoice && !order && <span className="text-slate-500">-</span>}
-                          </div>
-                        </td>
-                        <td className="px-6 py-3 text-slate-300 text-sm">
-                          {getMethodLabel(payment.method)}
-                        </td>
-                        <td className="px-6 py-3 text-slate-300 text-sm">
-                          {getPaymentTypeLabel(payment.payment_type)}
-                        </td>
-                        <td className="px-6 py-3 text-right font-semibold text-white text-sm">
-                          {formatCurrency(payment.amount)}
-                        </td>
-                        <td className="px-6 py-3 text-slate-300 text-sm max-w-xs">
-                          <span className="line-clamp-2">
-                            {payment.notes || '-'}
-                          </span>
-                        </td>
-                        <td className="px-6 py-3 text-right text-sm">
-                          <button
-                            type="button"
-                            onClick={() => handleOpenViewPayment(payment)}
-                            className="p-2 hover:bg-slate-800 rounded-lg text-slate-400 hover:text-slate-200 transition-colors"
-                          >
-                            <Eye size={16} />
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => handleOpenEditPayment(payment)}
-                            className="p-2 hover:bg-slate-800 rounded-lg text-slate-400 hover:text-slate-200 transition-colors"
-                          >
-                            <Edit2 size={16} />
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => handleDeletePayment(payment)}
-                            className="p-2 hover:bg-red-500/10 rounded-lg text-slate-400 hover:text-red-400 transition-colors"
-                          >
-                            <Trash2 size={16} />
-                          </button>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
+                          </td>
+                          <td className="px-6 py-3 text-right text-sm">
+                            <button
+                              type="button"
+                              onClick={() => handleOpenViewPayment(payment)}
+                              className="p-2 hover:bg-slate-800 rounded-lg text-slate-400 hover:text-slate-200 transition-colors"
+                            >
+                              <Eye size={16} />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleOpenEditPayment(payment)}
+                              className="p-2 hover:bg-slate-800 rounded-lg text-slate-400 hover:text-slate-200 transition-colors"
+                            >
+                              <Edit2 size={16} />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleDeletePayment(payment)}
+                              className="p-2 hover:bg-red-500/10 rounded-lg text-slate-400 hover:text-red-400 transition-colors"
+                            >
+                              <Trash2 size={16} />
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+              <div className="flex items-center justify-between px-6 py-3 border-t border-slate-700">
+                <p className="text-xs text-slate-400">
+                  Halaman{' '}
+                  <span className="font-semibold text-slate-200">
+                    {page}
+                  </span>{' '}
+                  dari{' '}
+                  <span className="font-semibold text-slate-200">
+                    {totalPages}
+                  </span>
+                </p>
+                <div className="flex gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    disabled={page <= 1 || loading}
+                    onClick={() => setPage((prev) => Math.max(1, prev - 1))}
+                    className="border-slate-700 text-slate-200 hover:bg-slate-800"
+                  >
+                    Sebelumnya
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    disabled={page >= totalPages || loading}
+                    onClick={() =>
+                      setPage((prev) =>
+                        totalPages > 0 ? Math.min(totalPages, prev + 1) : prev + 1
+                      )
+                    }
+                    className="border-slate-700 text-slate-200 hover:bg-slate-800"
+                  >
+                    Berikutnya
+                  </Button>
+                </div>
+              </div>
             </div>
           )}
         </div>

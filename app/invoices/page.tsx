@@ -24,6 +24,10 @@ export default function InvoicesPage() {
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [orders, setOrders] = useState<Order[]>([]);
+  const [page, setPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
+  const [startDate, setStartDate] = useState('');
+  const [endDate, setEndDate] = useState('');
   const [selectedInvoice, setSelectedInvoice] = useState<Invoice | null>(null);
   const [viewOpen, setViewOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
@@ -50,10 +54,25 @@ export default function InvoicesPage() {
       try {
         console.log('[v0] Fetching invoices...');
         setLoading(true);
+
+        const filters: string[] = [];
+        if (startDate) {
+          filters.push(`invoice_date >= "${startDate} 00:00:00"`);
+        }
+        if (endDate) {
+          filters.push(`invoice_date <= "${endDate} 23:59:59"`);
+        }
+
+        const invoiceOptions: any = {
+          sort: '-invoice_date',
+        };
+
+        if (filters.length > 0) {
+          invoiceOptions.filter = filters.join(' && ');
+        }
+
         const [invoicesRes, ordersRes] = await Promise.all([
-          pb.collection('invoices').getList(1, 100, {
-            sort: '-invoice_date',
-          }),
+          pb.collection('invoices').getList<Invoice>(page, 10, invoiceOptions),
           pb.collection('orders').getList(1, 100, {
             sort: '-order_date',
           }),
@@ -61,6 +80,7 @@ export default function InvoicesPage() {
         console.log('[v0] Invoices fetched:', invoicesRes.items.length);
         setInvoices(invoicesRes.items as Invoice[]);
         setOrders(ordersRes.items as Order[]);
+        setTotalPages(invoicesRes.totalPages || 1);
       } catch (error: any) {
         console.error('[v0] Fetch invoices error:', error.message);
         toast.error('Gagal memuat invoice');
@@ -70,7 +90,7 @@ export default function InvoicesPage() {
     };
 
     fetchInvoices();
-  }, [isAuthenticated, pb]);
+  }, [isAuthenticated, pb, page, startDate, endDate]);
 
   const filteredInvoices = useMemo(
     () =>
@@ -390,7 +410,63 @@ export default function InvoicesPage() {
             </div>
           </div>
           <div>
-            {pb && <AddInvoiceDialog pb={pb} orders={orders} onInvoiceAdded={(invoice) => setInvoices([invoice, ...invoices])} />}
+            {pb && (
+              <AddInvoiceDialog
+                pb={pb}
+                orders={orders}
+                onInvoiceAdded={(invoice) => {
+                  setPage(1);
+                  setInvoices((prev) => [invoice, ...prev]);
+                }}
+              />
+            )}
+          </div>
+        </div>
+
+        <div className="bg-slate-900 border border-slate-700 rounded-lg p-4">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div>
+              <label className="block text-xs font-medium text-slate-400 mb-1">
+                Dari Tanggal Invoice
+              </label>
+              <Input
+                type="date"
+                value={startDate}
+                onChange={(e) => {
+                  setStartDate(e.target.value);
+                  setPage(1);
+                }}
+                className="bg-slate-800 border-slate-700 text-white"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-slate-400 mb-1">
+                Sampai Tanggal Invoice
+              </label>
+              <Input
+                type="date"
+                value={endDate}
+                onChange={(e) => {
+                  setEndDate(e.target.value);
+                  setPage(1);
+                }}
+                className="bg-slate-800 border-slate-700 text-white"
+              />
+            </div>
+            <div className="flex items-end">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => {
+                  setStartDate('');
+                  setEndDate('');
+                  setPage(1);
+                }}
+                className="border-slate-700 text-slate-200 hover:bg-slate-800 w-full md:w-auto"
+              >
+                Reset Filter
+              </Button>
+            </div>
           </div>
         </div>
 
@@ -404,75 +480,119 @@ export default function InvoicesPage() {
                 : 'Tidak ada invoice yang cocok dengan pencarian'}
             </div>
           ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full">
-                <thead>
-                  <tr className="border-b border-slate-700 bg-slate-800/50">
-                    <th className="px-6 py-4 text-left text-xs font-semibold text-slate-300 uppercase">
-                      No Invoice
-                    </th>
-                    <th className="px-6 py-4 text-left text-xs font-semibold text-slate-300 uppercase">
-                      Pelanggan
-                    </th>
-                    <th className="px-6 py-4 text-left text-xs font-semibold text-slate-300 uppercase">
-                      Status
-                    </th>
-                    <th className="px-6 py-4 text-left text-xs font-semibold text-slate-300 uppercase">
-                      Jatuh Tempo
-                    </th>
-                    <th className="px-6 py-4 text-right text-xs font-semibold text-slate-300 uppercase">
-                      Total
-                    </th>
-                    <th className="px-6 py-4 text-right text-xs font-semibold text-slate-300 uppercase">
-                      Aksi
-                    </th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filteredInvoices.map((invoice) => (
-                    <tr
-                      key={invoice.id}
-                      className="border-b border-slate-700 hover:bg-slate-800/50 transition-colors"
-                    >
-                      <td className="px-6 py-4 font-medium text-white">{invoice.invoice_number}</td>
-                      <td className="px-6 py-4 text-slate-300">{invoice.customer}</td>
-                      <td className="px-6 py-4">
-                        <span className={`px-2 py-1 text-xs rounded-full font-medium ${getStatusColor(invoice.status)}`}>
-                          {invoice.status}
-                        </span>
-                      </td>
-                      <td className="px-6 py-4 text-slate-300">
-                        {invoice.due_date ? formatDate(invoice.due_date) : '-'}
-                      </td>
-                      <td className="px-6 py-4 text-right font-semibold text-white">
-                        {formatCurrency(invoice.total_amount)}
-                      </td>
-                      <td className="px-6 py-4 flex justify-end gap-2">
-                        <button
-                          type="button"
-                          onClick={() => handleOpenView(invoice)}
-                          className="p-2 hover:bg-slate-800 rounded-lg text-slate-400 hover:text-slate-200 transition-colors"
-                        >
-                          <Eye size={16} />
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => handleOpenEdit(invoice)}
-                          className="p-2 hover:bg-slate-800 rounded-lg text-slate-400 hover:text-slate-200 transition-colors"
-                        >
-                          <Edit2 size={16} />
-                        </button>
-                        <button
-                          onClick={() => handleDelete(invoice.id)}
-                          className="p-2 hover:bg-red-500/10 rounded-lg text-slate-400 hover:text-red-400 transition-colors"
-                        >
-                          <Trash2 size={16} />
-                        </button>
-                      </td>
+            <div>
+              <div className="overflow-x-auto">
+                <table className="w-full">
+                  <thead>
+                    <tr className="border-b border-slate-700 bg-slate-800/50">
+                      <th className="px-6 py-4 text-left text-xs font-semibold text-slate-300 uppercase">
+                        No Invoice
+                      </th>
+                      <th className="px-6 py-4 text-left text-xs font-semibold text-slate-300 uppercase">
+                        Pelanggan
+                      </th>
+                      <th className="px-6 py-4 text-left text-xs font-semibold text-slate-300 uppercase">
+                        Status
+                      </th>
+                      <th className="px-6 py-4 text-left text-xs font-semibold text-slate-300 uppercase">
+                        Jatuh Tempo
+                      </th>
+                      <th className="px-6 py-4 text-right text-xs font-semibold text-slate-300 uppercase">
+                        Total
+                      </th>
+                      <th className="px-6 py-4 text-right text-xs font-semibold text-slate-300 uppercase">
+                        Aksi
+                      </th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody>
+                    {filteredInvoices.map((invoice) => (
+                      <tr
+                        key={invoice.id}
+                        className="border-b border-slate-700 hover:bg-slate-800/50 transition-colors"
+                      >
+                        <td className="px-6 py-4 font-medium text-white">
+                          {invoice.invoice_number}
+                        </td>
+                        <td className="px-6 py-4 text-slate-300">{invoice.customer}</td>
+                        <td className="px-6 py-4">
+                          <span
+                            className={`px-2 py-1 text-xs rounded-full font-medium ${getStatusColor(
+                              invoice.status
+                            )}`}
+                          >
+                            {invoice.status}
+                          </span>
+                        </td>
+                        <td className="px-6 py-4 text-slate-300">
+                          {invoice.due_date ? formatDate(invoice.due_date) : '-'}
+                        </td>
+                        <td className="px-6 py-4 text-right font-semibold text-white">
+                          {formatCurrency(invoice.total_amount)}
+                        </td>
+                        <td className="px-6 py-4 flex justify-end gap-2">
+                          <button
+                            type="button"
+                            onClick={() => handleOpenView(invoice)}
+                            className="p-2 hover:bg-slate-800 rounded-lg text-slate-400 hover:text-slate-200 transition-colors"
+                          >
+                            <Eye size={16} />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleOpenEdit(invoice)}
+                            className="p-2 hover:bg-slate-800 rounded-lg text-slate-400 hover:text-slate-200 transition-colors"
+                          >
+                            <Edit2 size={16} />
+                          </button>
+                          <button
+                            onClick={() => handleDelete(invoice.id)}
+                            className="p-2 hover:bg-red-500/10 rounded-lg text-slate-400 hover:text-red-400 transition-colors"
+                          >
+                            <Trash2 size={16} />
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <div className="flex items-center justify-between px-6 py-3 border-t border-slate-700">
+                <p className="text-xs text-slate-400">
+                  Halaman{' '}
+                  <span className="font-semibold text-slate-200">
+                    {page}
+                  </span>{' '}
+                  dari{' '}
+                  <span className="font-semibold text-slate-200">
+                    {totalPages}
+                  </span>
+                </p>
+                <div className="flex gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    disabled={page <= 1 || loading}
+                    onClick={() => setPage((prev) => Math.max(1, prev - 1))}
+                    className="border-slate-700 text-slate-200 hover:bg-slate-800"
+                  >
+                    Sebelumnya
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    disabled={page >= totalPages || loading}
+                    onClick={() =>
+                      setPage((prev) =>
+                        totalPages > 0 ? Math.min(totalPages, prev + 1) : prev + 1
+                      )
+                    }
+                    className="border-slate-700 text-slate-200 hover:bg-slate-800"
+                  >
+                    Berikutnya
+                  </Button>
+                </div>
+              </div>
             </div>
           )}
         </div>

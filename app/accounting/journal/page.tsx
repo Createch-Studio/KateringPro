@@ -23,6 +23,10 @@ export default function JournalPage() {
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
+  const [page, setPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
+  const [startDate, setStartDate] = useState('');
+  const [endDate, setEndDate] = useState('');
 
   const [dialogOpen, setDialogOpen] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -47,16 +51,31 @@ export default function JournalPage() {
     const fetchData = async () => {
       try {
         setLoading(true);
+        const filters: string[] = [];
+        if (startDate) {
+          filters.push(`entry_date >= "${startDate} 00:00:00"`);
+        }
+        if (endDate) {
+          filters.push(`entry_date <= "${endDate} 23:59:59"`);
+        }
+
+        const journalOptions: any = {
+          sort: '-entry_date',
+        };
+
+        if (filters.length > 0) {
+          journalOptions.filter = filters.join(' && ');
+        }
+
         const [accountsRes, journalRes] = await Promise.all([
           pb.collection('chart_of_accounts').getList(1, 200, {
             sort: 'code',
           }),
-          pb.collection('journal_entries').getList(1, 200, {
-            sort: '-entry_date',
-          }),
+          pb.collection('journal_entries').getList<JournalEntry>(page, 10, journalOptions),
         ]);
         setAccounts(accountsRes.items as Account[]);
         setEntries(journalRes.items as JournalEntry[]);
+        setTotalPages(journalRes.totalPages || 1);
       } catch (error: any) {
         const message = getPocketBaseErrorMessage(error, 'Gagal memuat data jurnal');
         console.error('[v0] Fetch journal error:', message);
@@ -67,7 +86,7 @@ export default function JournalPage() {
     };
 
     fetchData();
-  }, [pb, isAuthenticated]);
+  }, [pb, isAuthenticated, page, startDate, endDate]);
 
   useEffect(() => {
     if (accounts.length > 0 && !formData.account_id) {
@@ -194,6 +213,7 @@ export default function JournalPage() {
           .collection('journal_entries')
           .create(payload)) as JournalEntry;
         setEntries((prev) => [created, ...prev]);
+        setPage(1);
         toast.success('Entri jurnal baru berhasil ditambahkan');
       }
 
@@ -272,6 +292,53 @@ export default function JournalPage() {
           </div>
         </div>
 
+        <div className="bg-slate-900 border border-slate-700 rounded-lg p-4">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div>
+              <label className="block text-xs font-medium text-slate-400 mb-1">
+                Dari Tanggal
+              </label>
+              <Input
+                type="date"
+                value={startDate}
+                onChange={(e) => {
+                  setStartDate(e.target.value);
+                  setPage(1);
+                }}
+                className="bg-slate-800 border-slate-700 text-white"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-slate-400 mb-1">
+                Sampai Tanggal
+              </label>
+              <Input
+                type="date"
+                value={endDate}
+                onChange={(e) => {
+                  setEndDate(e.target.value);
+                  setPage(1);
+                }}
+                className="bg-slate-800 border-slate-700 text-white"
+              />
+            </div>
+            <div className="flex items-end">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => {
+                  setStartDate('');
+                  setEndDate('');
+                  setPage(1);
+                }}
+                className="border-slate-700 text-slate-200 hover:bg-slate-800 w-full md:w-auto"
+              >
+                Reset Filter
+              </Button>
+            </div>
+          </div>
+        </div>
+
         <div className="bg-slate-900 border border-slate-700 rounded-lg overflow-hidden">
           {loading ? (
             <div className="p-8 text-center text-slate-400 flex items-center justify-center gap-2">
@@ -285,90 +352,128 @@ export default function JournalPage() {
                 : 'Tidak ada entri yang cocok dengan pencarian'}
             </div>
           ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full">
-                <thead>
-                  <tr className="border-b border-slate-700 bg-slate-800/50">
-                    <th className="px-6 py-3 text-left text-xs font-semibold text-slate-300 uppercase">
-                      Tanggal
-                    </th>
-                    <th className="px-6 py-3 text-left text-xs font-semibold text-slate-300 uppercase">
-                      Referensi
-                    </th>
-                    <th className="px-6 py-3 text-left text-xs font-semibold text-slate-300 uppercase">
-                      Akun
-                    </th>
-                    <th className="px-6 py-3 text-left text-xs font-semibold text-slate-300 uppercase">
-                      Deskripsi
-                    </th>
-                    <th className="px-6 py-3 text-right text-xs font-semibold text-slate-300 uppercase">
-                      Debit
-                    </th>
-                    <th className="px-6 py-3 text-right text-xs font-semibold text-slate-300 uppercase">
-                      Kredit
-                    </th>
-                    <th className="px-6 py-3 text-right text-xs font-semibold text-slate-300 uppercase">
-                      Aksi
-                    </th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filteredEntries.map((entry) => (
-                    <tr
-                      key={entry.id}
-                      className="border-b border-slate-800 hover:bg-slate-800/40 transition-colors"
-                    >
-                      <td className="px-6 py-3 text-sm text-slate-200">
-                        <div className="inline-flex items-center gap-2">
-                          <Calendar className="w-3 h-3 text-slate-500" />
-                          <span>{formatDate(entry.entry_date)}</span>
-                        </div>
-                      </td>
-                      <td className="px-6 py-3 text-sm text-slate-200">
-                        {entry.reference || '-'}
-                      </td>
-                      <td className="px-6 py-3 text-sm text-slate-200">
-                        {getAccountLabel(entry.account_id)}
-                      </td>
-                      <td className="px-6 py-3 text-sm text-slate-300 max-w-xs">
-                        <span className="line-clamp-2">
-                          {entry.description || entry.notes || '-'}
-                        </span>
-                      </td>
-                      <td className="px-6 py-3 text-sm text-right text-emerald-300 font-medium">
-                        {entry.debit > 0
-                          ? `Rp ${entry.debit.toLocaleString('id-ID')}`
-                          : '-'}
-                      </td>
-                      <td className="px-6 py-3 text-sm text-right text-red-300 font-medium">
-                        {entry.credit > 0
-                          ? `Rp ${entry.credit.toLocaleString('id-ID')}`
-                          : '-'}
-                      </td>
-                      <td className="px-6 py-3 text-sm flex justify-end gap-2">
-                        {!isViewOnlyRole && (
-                          <>
-                            <button
-                              type="button"
-                              onClick={() => handleOpenEdit(entry)}
-                              className="p-2 hover:bg-slate-800 rounded-lg text-slate-400 hover:text-slate-200 transition-colors"
-                            >
-                              <Edit2 className="w-4 h-4" />
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => handleDelete(entry)}
-                              className="p-2 hover:bg-red-500/10 rounded-lg text-slate-400 hover:text-red-400 transition-colors"
-                            >
-                              <Trash2 className="w-4 h-4" />
-                            </button>
-                          </>
-                        )}
-                      </td>
+            <div>
+              <div className="overflow-x-auto">
+                <table className="w-full">
+                  <thead>
+                    <tr className="border-b border-slate-700 bg-slate-800/50">
+                      <th className="px-6 py-3 text-left text-xs font-semibold text-slate-300 uppercase">
+                        Tanggal
+                      </th>
+                      <th className="px-6 py-3 text-left text-xs font-semibold text-slate-300 uppercase">
+                        Referensi
+                      </th>
+                      <th className="px-6 py-3 text-left text-xs font-semibold text-slate-300 uppercase">
+                        Akun
+                      </th>
+                      <th className="px-6 py-3 text-left text-xs font-semibold text-slate-300 uppercase">
+                        Deskripsi
+                      </th>
+                      <th className="px-6 py-3 text-right text-xs font-semibold text-slate-300 uppercase">
+                        Debit
+                      </th>
+                      <th className="px-6 py-3 text-right text-xs font-semibold text-slate-300 uppercase">
+                        Kredit
+                      </th>
+                      <th className="px-6 py-3 text-right text-xs font-semibold text-slate-300 uppercase">
+                        Aksi
+                      </th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody>
+                    {filteredEntries.map((entry) => (
+                      <tr
+                        key={entry.id}
+                        className="border-b border-slate-800 hover:bg-slate-800/40 transition-colors"
+                      >
+                        <td className="px-6 py-3 text-sm text-slate-200">
+                          <div className="inline-flex items-center gap-2">
+                            <Calendar className="w-3 h-3 text-slate-500" />
+                            <span>{formatDate(entry.entry_date)}</span>
+                          </div>
+                        </td>
+                        <td className="px-6 py-3 text-sm text-slate-200">
+                          {entry.reference || '-'}
+                        </td>
+                        <td className="px-6 py-3 text-sm text-slate-200">
+                          {getAccountLabel(entry.account_id)}
+                        </td>
+                        <td className="px-6 py-3 text-sm text-slate-300 max-w-xs">
+                          <span className="line-clamp-2">
+                            {entry.description || entry.notes || '-'}
+                          </span>
+                        </td>
+                        <td className="px-6 py-3 text-sm text-right text-emerald-300 font-medium">
+                          {entry.debit > 0
+                            ? `Rp ${entry.debit.toLocaleString('id-ID')}`
+                            : '-'}
+                        </td>
+                        <td className="px-6 py-3 text-sm text-right text-red-300 font-medium">
+                          {entry.credit > 0
+                            ? `Rp ${entry.credit.toLocaleString('id-ID')}`
+                            : '-'}
+                        </td>
+                        <td className="px-6 py-3 text-sm flex justify-end gap-2">
+                          {!isViewOnlyRole && (
+                            <>
+                              <button
+                                type="button"
+                                onClick={() => handleOpenEdit(entry)}
+                                className="p-2 hover:bg-slate-800 rounded-lg text-slate-400 hover:text-slate-200 transition-colors"
+                              >
+                                <Edit2 className="w-4 h-4" />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleDelete(entry)}
+                                className="p-2 hover:bg-red-500/10 rounded-lg text-slate-400 hover:text-red-400 transition-colors"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            </>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <div className="flex items-center justify-between px-6 py-3 border-t border-slate-700">
+                <p className="text-xs text-slate-400">
+                  Halaman{' '}
+                  <span className="font-semibold text-slate-200">
+                    {page}
+                  </span>{' '}
+                  dari{' '}
+                  <span className="font-semibold text-slate-200">
+                    {totalPages}
+                  </span>
+                </p>
+                <div className="flex gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    disabled={page <= 1 || loading}
+                    onClick={() => setPage((prev) => Math.max(1, prev - 1))}
+                    className="border-slate-700 text-slate-200 hover:bg-slate-800"
+                  >
+                    Sebelumnya
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    disabled={page >= totalPages || loading}
+                    onClick={() =>
+                      setPage((prev) =>
+                        totalPages > 0 ? Math.min(totalPages, prev + 1) : prev + 1
+                      )
+                    }
+                    className="border-slate-700 text-slate-200 hover:bg-slate-800"
+                  >
+                    Berikutnya
+                  </Button>
+                </div>
+              </div>
             </div>
           )}
         </div>
