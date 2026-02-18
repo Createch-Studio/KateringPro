@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { useAuth } from '@/lib/auth-context';
 import { formatCurrency } from '@/lib/api';
-import { Expense, Invoice, Payment } from '@/lib/types';
+import { Account, Expense, Invoice, JournalEntry, Payment } from '@/lib/types';
 import { Input } from '@/components/ui/input';
 import { Calendar, Loader2 } from 'lucide-react';
 
@@ -21,6 +21,8 @@ export default function AccountingReportsPage() {
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [payments, setPayments] = useState<Payment[]>([]);
   const [expenses, setExpenses] = useState<Expense[]>([]);
+  const [accounts, setAccounts] = useState<Account[]>([]);
+  const [journalEntries, setJournalEntries] = useState<JournalEntry[]>([]);
   const [range, setRange] = useState<ReportRange>('month');
   const [startDate, setStartDate] = useState<string>('');
   const [endDate, setEndDate] = useState<string>('');
@@ -35,7 +37,7 @@ export default function AccountingReportsPage() {
       try {
         setLoading(true);
 
-        const [invoicesRes, paymentsRes, expensesRes] = await Promise.all([
+        const [invoicesRes, paymentsRes, expensesRes, accountsRes, journalRes] = await Promise.all([
           pb.collection('invoices').getList(1, 200, {
             sort: '-invoice_date',
           }),
@@ -46,11 +48,19 @@ export default function AccountingReportsPage() {
             sort: '-expense_date',
             filter: 'is_deleted = false || is_deleted = ""',
           }),
+          pb.collection('chart_of_accounts').getList(1, 200, {
+            sort: 'code',
+          }),
+          pb.collection('journal_entries').getList(1, 500, {
+            sort: '-entry_date',
+          }),
         ]);
 
         setInvoices(invoicesRes.items as Invoice[]);
         setPayments(paymentsRes.items as Payment[]);
         setExpenses(expensesRes.items as Expense[]);
+        setAccounts(accountsRes.items as Account[]);
+        setJournalEntries(journalRes.items as JournalEntry[]);
       } catch (error) {
         console.error('[v0] Accounting reports fetch error:', error);
       } finally {
@@ -126,6 +136,45 @@ export default function AccountingReportsPage() {
   const totalExpenses = expenseSummary[0]?.value || 0;
   const profit = totalIncome - totalExpenses;
 
+  const journalPlSummary = useMemo(() => {
+    if (!journalEntries.length || !accounts.length) {
+      return {
+        revenue: 0,
+        expenses: 0,
+        profit: 0,
+      };
+    }
+
+    const inRangeEntries = journalEntries.filter((entry) => withinRange(entry.entry_date));
+
+    let revenue = 0;
+    let expensesTotal = 0;
+
+    inRangeEntries.forEach((entry) => {
+      const account = accounts.find((a) => a.id === entry.account_id);
+      if (!account) return;
+
+      const debit = entry.debit || 0;
+      const credit = entry.credit || 0;
+
+      if (account.type === 'revenue') {
+        const change = credit - debit;
+        revenue += change;
+      } else if (account.type === 'expense') {
+        const change = debit - credit;
+        expensesTotal += change;
+      }
+    });
+
+    const journalProfit = revenue - expensesTotal;
+
+    return {
+      revenue,
+      expenses: expensesTotal,
+      profit: journalProfit,
+    };
+  }, [journalEntries, accounts, startDate, endDate]);
+
   return (
     <MainLayout title="Laporan Akuntansi">
       <div className="space-y-6">
@@ -133,8 +182,8 @@ export default function AccountingReportsPage() {
           <div>
             <h1 className="text-2xl font-semibold text-white">Laporan Keuangan</h1>
             <p className="text-sm text-slate-400">
-              Ringkasan pendapatan, pengeluaran, dan laba rugi berdasarkan data invoice, pembayaran, dan
-              pengeluaran.
+              Ringkasan pendapatan, pengeluaran, dan laba rugi berdasarkan data invoice, pembayaran,
+              pengeluaran, serta jurnal umum.
             </p>
           </div>
 
@@ -225,6 +274,37 @@ export default function AccountingReportsPage() {
           </div>
         </div>
 
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className="bg-slate-900 border border-slate-700 rounded-lg p-5">
+            <p className="text-slate-400 text-xs font-medium mb-2 uppercase tracking-wide">
+              Pendapatan (Jurnal)
+            </p>
+            <p className="text-2xl md:text-3xl font-bold text-emerald-400">
+              {formatCurrency(journalPlSummary.revenue)}
+            </p>
+          </div>
+          <div className="bg-slate-900 border border-slate-700 rounded-lg p-5">
+            <p className="text-slate-400 text-xs font-medium mb-2 uppercase tracking-wide">
+              Beban (Jurnal)
+            </p>
+            <p className="text-2xl md:text-3xl font-bold text-red-400">
+              {formatCurrency(journalPlSummary.expenses)}
+            </p>
+          </div>
+          <div className="bg-slate-900 border border-slate-700 rounded-lg p-5">
+            <p className="text-slate-400 text-xs font-medium mb-2 uppercase tracking-wide">
+              Laba / Rugi (Jurnal)
+            </p>
+            <p
+              className={`text-2xl md:text-3xl font-bold ${
+                journalPlSummary.profit >= 0 ? 'text-emerald-400' : 'text-red-400'
+              }`}
+            >
+              {formatCurrency(journalPlSummary.profit)}
+            </p>
+          </div>
+        </div>
+
         {loading ? (
           <div className="bg-slate-900 border border-slate-700 rounded-lg p-10 flex items-center justify-center text-slate-400 gap-3">
             <Loader2 className="w-5 h-5 animate-spin" />
@@ -267,4 +347,3 @@ export default function AccountingReportsPage() {
     </MainLayout>
   );
 }
-

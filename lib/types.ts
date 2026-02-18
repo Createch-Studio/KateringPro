@@ -134,6 +134,27 @@ export interface Expense extends BaseRecord {
   is_deleted?: boolean;
 }
 
+// Accounts (Chart of Accounts)
+export interface Account extends BaseRecord {
+  code: string;
+  name: string;
+  type: 'asset' | 'liability' | 'equity' | 'revenue' | 'expense';
+  normal_balance: 'debit' | 'credit';
+  is_active?: boolean;
+  description?: string;
+}
+
+export interface JournalEntry extends BaseRecord {
+  entry_date: string;
+  reference?: string;
+  account_id: string;
+  description?: string;
+  debit: number;
+  credit: number;
+  source?: 'manual' | 'system';
+  notes?: string;
+}
+
 // User (PocketBase Auth)
 export interface User extends BaseRecord {
   email: string;
