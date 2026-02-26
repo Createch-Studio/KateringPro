@@ -59,9 +59,9 @@ export async function POST(request: Request) {
             const invoice = invoices[0];
 
             // 4. Update status pembayaran di PocketBase menjadi 'paid'
-            if (invoice.payment_status !== 'paid') {
+            if (invoice.status !== 'paid') {
                 await pb.collection('invoices').update(invoice.id, {
-                    payment_status: 'paid',
+                    status: 'paid',
                     midtrans_transaction_id: body.transaction_id, // Simpan ID transaksi Midtrans
                     payment_details: JSON.stringify(body), // Simpan seluruh payload notifikasi untuk audit
                 });

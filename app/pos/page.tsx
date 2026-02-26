@@ -257,6 +257,54 @@ const qrCodeUrl = qrCodeV2?.url || transaction.actions?.find((a: any) => a.name 
         throw new Error('URL QR Code tidak ditemukan dari Midtrans.');
       }
 
+      const today = new Date().toISOString().split('T')[0];
+      const orderNumber = midtransOrderId;
+      const invoiceNumber = `INV-${Date.now().toString().slice(-6)}`;
+
+      const newOrderPayload: any = {
+        order_number: orderNumber,
+        customer_id: selectedCustomerId,
+        order_date: today,
+        event_date: today,
+        status: 'confirmed',
+        subtotal: subtotal,
+        tax: 0,
+        total: total,
+        payment_type: 'qris',
+        paid_amount: 0,
+        notes: 'Transaksi PoS (QRIS)',
+      };
+
+      const newOrder = (await pb.collection('orders').create(newOrderPayload)) as Order;
+
+      for (const item of cartItems) {
+        await pb.collection('order_items').create({
+          order_id: newOrder.id,
+          menu_id: item.menu.id,
+          quantity: item.quantity,
+          unit_price: item.menu.price,
+          total: item.menu.price * item.quantity,
+        });
+      }
+
+      const invoicePayload: any = {
+        invoice_number: invoiceNumber,
+        order_id: newOrder.id,
+        invoice_date: today,
+        due_date: today,
+        amount: total,
+        tax_amount: 0,
+        total_amount: total,
+        status: 'sent',
+        notes: `Invoice PoS (QRIS) ${orderNumber}`,
+      };
+
+      const newInvoice = (await pb
+        .collection('invoices')
+        .create(invoicePayload)) as Invoice;
+
+      setPendingInvoiceId(newInvoice.id);
+
       setMidtransTransaction({ ...transaction, qr_code_url: qrCodeUrl, midtrans_order_id: midtransOrderId });
 
     } catch (error: any) {
@@ -368,7 +416,7 @@ const qrCodeUrl = qrCodeV2?.url || transaction.actions?.find((a: any) => a.name 
 
   const handleInvoiceUpdate = (e: any) => {
     console.log('[v0] Real-time event received:', e);
-    if (e.record.id === pendingInvoiceId && e.record.payment_status === 'paid') {
+    if (e.record.id === pendingInvoiceId && e.record.status === 'paid') {
       console.log(`[v0] Payment for invoice ${pendingInvoiceId} confirmed via real-time update.`);
       toast.success('Pembayaran QRIS berhasil diterima!');
       
@@ -376,8 +424,8 @@ const qrCodeUrl = qrCodeV2?.url || transaction.actions?.find((a: any) => a.name 
       setMidtransTransaction(null);
       setPendingInvoiceId(null);
       setCartItems([]);
-      setSelectedCustomerId(null);
-      setNotes('');
+      setSelectedCustomerId('');
+      setPaymentMethod('cash');
     }
   };
 
