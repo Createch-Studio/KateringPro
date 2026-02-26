@@ -484,6 +484,49 @@ const qrCodeUrl = qrCodeV2?.url || transaction.actions?.find((a: any) => a.name 
     }
   };
 
+  const checkPaymentStatus = async () => {
+    if (!pb || !pendingInvoiceId) return;
+    
+    try {
+      setSaving(true);
+      const invoice = await pb.collection('invoices').getOne(pendingInvoiceId);
+      
+      if (invoice.status === 'paid') {
+        toast.success('Pembayaran terkonfirmasi!');
+        
+        // Trigger logika sukses yang sama dengan realtime
+        const currentCartItems = cartItemsRef.current;
+        const currentTotal = totalRef.current;
+        const currentTransaction = midtransTransactionRef.current;
+        const currentCustomer = customersRef.current.find(c => c.id === selectedCustomerIdRef.current);
+        
+        setLastOrderDetails({
+          orderId: currentTransaction?.midtrans_order_id || pendingInvoiceId || 'UNKNOWN',
+          date: new Date().toLocaleString('id-ID'),
+          customerName: currentCustomer?.name || 'Guest',
+          items: [...currentCartItems], 
+          total: currentTotal,
+          paymentMethod: 'QRIS'
+        });
+        
+        setSuccessDialogOpen(true);
+        setQrisDialogOpen(false);
+        setMidtransTransaction(null);
+        setPendingInvoiceId(null);
+        setCartItems([]);
+        setSelectedCustomerId('');
+        setPaymentMethod('cash');
+      } else {
+        toast.info('Pembayaran belum diterima/diproses. Silakan coba lagi sesaat lagi.');
+      }
+    } catch (error) {
+      console.error('Error checking status:', error);
+      toast.error('Gagal mengecek status pembayaran');
+    } finally {
+      setSaving(false);
+    }
+  };
+
   return (
     <PosLayout title="PoS (Point of Sale)">
       <div className="h-full flex flex-col lg:flex-row gap-6">
@@ -805,8 +848,16 @@ const qrCodeUrl = qrCodeV2?.url || transaction.actions?.find((a: any) => a.name 
           </DialogContent>
         </Dialog>
 
-<Dialog open={qrisDialogOpen} onOpenChange={setQrisDialogOpen}>
-  <DialogContent className="sm:max-w-[420px] bg-slate-900 border border-slate-700">
+<Dialog open={qrisDialogOpen} onOpenChange={(open) => {
+  // Cegah penutupan dialog saat klik di luar (backdrop)
+  if (!open) return; 
+  setQrisDialogOpen(open);
+}}>
+  <DialogContent 
+    className="sm:max-w-[420px] bg-slate-900 border border-slate-700" 
+    onInteractOutside={(e) => e.preventDefault()} 
+    onEscapeKeyDown={(e) => e.preventDefault()}
+  >
     <DialogHeader>
       <DialogTitle className="text-white">Pembayaran QRIS</DialogTitle>
       <DialogDescription className="text-slate-400">
@@ -844,15 +895,26 @@ const qrCodeUrl = qrCodeV2?.url || transaction.actions?.find((a: any) => a.name 
       <div className="flex justify-end gap-3 pt-2">
         <Button
           type="button"
+          variant="secondary"
+          onClick={checkPaymentStatus}
+          disabled={saving}
+          className="bg-blue-500/10 text-blue-400 hover:bg-blue-500/20 hover:text-blue-300 border border-blue-500/20"
+        >
+          Cek Status
+        </Button>
+        <Button
+          type="button"
           variant="outline"
           onClick={() => {
-            setQrisDialogOpen(false);
-            setMidtransTransaction(null);
-            // Hapus invoice pending jika dibatalkan
-            if (pb && pendingInvoiceId) {
-              pb.collection('invoices').delete(pendingInvoiceId).catch(delErr => console.error("Failed to delete pending invoice on cancel:", delErr));
+            if (confirm('Apakah Anda yakin ingin membatalkan transaksi ini?')) {
+                setQrisDialogOpen(false);
+                setMidtransTransaction(null);
+                // Hapus invoice pending jika dibatalkan
+                if (pb && pendingInvoiceId) {
+                  pb.collection('invoices').delete(pendingInvoiceId).catch(delErr => console.error("Failed to delete pending invoice on cancel:", delErr));
+                }
+                setPendingInvoiceId(null);
             }
-            setPendingInvoiceId(null);
           }}
           disabled={saving}
           className="border-slate-700 text-slate-300 hover:text-white"
