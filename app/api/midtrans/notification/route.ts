@@ -1,6 +1,8 @@
 import { NextResponse } from 'next/server';
 import crypto from 'crypto';
-import { pb } from '@/lib/pocketbase'; // Pastikan path ini benar
+import { getPocketBase } from '@/lib/pocketbase';
+
+const pb = getPocketBase();
 
 // Fungsi untuk memverifikasi notifikasi dari Midtrans
 async function verifyMidtransSignature(body: any): Promise<boolean> {
