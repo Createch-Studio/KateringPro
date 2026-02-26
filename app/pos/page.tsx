@@ -36,6 +36,9 @@ export default function PosPage() {
   const [sessionLoading, setSessionLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [checkoutDialogOpen, setCheckoutDialogOpen] = useState(false);
+  const [qrisDialogOpen, setQrisDialogOpen] = useState(false);
+  const [midtransTransaction, setMidtransTransaction] = useState<any>(null);
+  const [pendingInvoiceId, setPendingInvoiceId] = useState<string | null>(null);
   const [paymentMethod, setPaymentMethod] = useState<PosPaymentMethod>('cash');
   const [selectedCustomerId, setSelectedCustomerId] = useState('');
 
@@ -200,6 +203,70 @@ export default function PosPage() {
   };
 
   const handleConfirmCheckout = async () => {
+    if (paymentMethod === 'qris') {
+      await handleQrisCheckout();
+    } else {
+      await handleStandardCheckout();
+    }
+  };
+
+  const handleQrisCheckout = async () => {
+    if (isViewOnlyRole || !pb || !user || !registerSession || cartItems.length === 0 || !selectedCustomerId) {
+      toast.error('Kondisi untuk checkout tidak terpenuhi.');
+      return;
+    }
+
+    const customer = customers.find(c => c.id === selectedCustomerId);
+    if (!customer) {
+      toast.error('Pelanggan tidak ditemukan.');
+      return;
+    }
+
+    try {
+      setSaving(true);
+      const midtransOrderId = `POS-${Date.now()}`;
+
+      const response = await fetch('/api/midtrans/charge', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          order_id: midtransOrderId,
+          total: total,
+          customer_name: customer.name,
+          customer_email: customer.email,
+        }),
+      });
+
+      const transaction = await response.json();
+
+      if (!response.ok) {
+        throw new Error(transaction.message || 'Gagal membuat transaksi QRIS.');
+      }
+      
+// Prioritaskan URL v2 jika ada, jika tidak, gunakan URL standar
+const qrCodeV2 = transaction.actions?.find((a: any) => a.name === 'generate-qr-code-v2');
+const qrCodeUrl = qrCodeV2?.url || transaction.actions?.find((a: any) => a.name === 'generate-qr-code')?.url;
+
+      if (!qrCodeUrl) {
+        throw new Error('URL QR Code tidak ditemukan dari Midtrans.');
+      }
+
+      setMidtransTransaction({ ...transaction, qr_code_url: qrCodeUrl, midtrans_order_id: midtransOrderId });
+      setCheckoutDialogOpen(false);
+      setQrisDialogOpen(true);
+
+    } catch (error: any) {
+      const message = getPocketBaseErrorMessage(error, 'Gagal memproses pembayaran QRIS');
+      console.error('[v0] PoS QRIS checkout error:', message);
+      toast.error(message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleStandardCheckout = async () => {
     if (isViewOnlyRole) {
       toast.error('Role Anda hanya dapat melihat data dan tidak bisa melakukan transaksi PoS');
       return;
@@ -290,6 +357,34 @@ export default function PosPage() {
       setSaving(false);
     }
   };
+
+  useEffect(() => {
+  if (!pb || !pendingInvoiceId) return;
+
+  console.log(`[v0] Subscribing to invoice: ${pendingInvoiceId}`);
+
+  const handleInvoiceUpdate = (e: any) => {
+    console.log('[v0] Real-time event received:', e);
+    if (e.record.id === pendingInvoiceId && e.record.payment_status === 'paid') {
+      console.log(`[v0] Payment for invoice ${pendingInvoiceId} confirmed via real-time update.`);
+      toast.success('Pembayaran QRIS berhasil diterima!');
+      
+      setQrisDialogOpen(false);
+      setMidtransTransaction(null);
+      setPendingInvoiceId(null);
+      setCartItems([]);
+      setSelectedCustomerId(null);
+      setNotes('');
+    }
+  };
+
+  pb.collection('invoices').subscribe(pendingInvoiceId, handleInvoiceUpdate);
+
+  return () => {
+    console.log(`[v0] Unsubscribing from invoice: ${pendingInvoiceId}`);
+    pb.collection('invoices').unsubscribe(pendingInvoiceId);
+  };
+}, [pb, pendingInvoiceId, setCartItems, setSelectedCustomerId]);
 
   return (
     <MainLayout title="PoS (Point of Sale)">
@@ -508,12 +603,71 @@ export default function PosPage() {
                   disabled={saving}
                   className="bg-orange-500 hover:bg-orange-600 text-white"
                 >
-                  {saving ? 'Menyimpan...' : 'Konfirmasi & Bayar'}
+                  {saving ? 'Memproses...' : 'Konfirmasi & Bayar'}
                 </Button>
               </div>
             </div>
           </DialogContent>
         </Dialog>
+
+<Dialog open={qrisDialogOpen} onOpenChange={setQrisDialogOpen}>
+  <DialogContent className="sm:max-w-[420px] bg-slate-900 border border-slate-700">
+    <DialogHeader>
+      <DialogTitle className="text-white">Pembayaran QRIS</DialogTitle>
+      <DialogDescription className="text-slate-400">
+        Scan QR code di bawah ini untuk membayar. Status akan terupdate otomatis.
+      </DialogDescription>
+    </DialogHeader>
+
+    <div className="space-y-4 mt-2 text-center">
+      {midtransTransaction?.qr_code_url ? (
+        <div className="flex justify-center">
+          <img
+            src={midtransTransaction.qr_code_url}
+            alt="QR Code Pembayaran"
+            className="w-64 h-64 rounded-lg bg-white p-2"
+          />
+        </div>
+      ) : (
+        <div className="text-slate-400">Memuat QR Code...</div>
+      )}
+      <div className="bg-slate-800 rounded-lg p-3">
+        <p className="text-sm text-slate-300">Total Pembayaran</p>
+        <p className="text-2xl font-bold text-orange-400">
+          {formatCurrency(total)}
+        </p>
+      </div>
+      <div className="text-center pt-2">
+        <p className="text-slate-400 text-sm flex items-center justify-center gap-2">
+          <svg className="animate-spin h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+          </svg>
+          Menunggu pembayaran...
+        </p>
+      </div>
+      <div className="flex justify-end gap-3 pt-2">
+        <Button
+          type="button"
+          variant="outline"
+          onClick={() => {
+            setQrisDialogOpen(false);
+            setMidtransTransaction(null);
+            // Hapus invoice pending jika dibatalkan
+            if (pb && pendingInvoiceId) {
+              pb.collection('invoices').delete(pendingInvoiceId).catch(delErr => console.error("Failed to delete pending invoice on cancel:", delErr));
+            }
+            setPendingInvoiceId(null);
+          }}
+          disabled={saving}
+          className="border-slate-700 text-slate-300 hover:text-white"
+        >
+          Batal
+        </Button>
+      </div>
+    </div>
+  </DialogContent>
+</Dialog>
       </div>
     </MainLayout>
   );
