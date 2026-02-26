@@ -928,7 +928,6 @@ const qrCodeUrl = qrCodeV2?.url || transaction.actions?.find((a: any) => a.name 
     )}
   </DialogContent>
 </Dialog>
-      </div>
     </PosLayout>
   );
 }
