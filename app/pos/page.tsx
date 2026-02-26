@@ -53,8 +53,11 @@ export default function PosPage() {
 
   // Cash Register State
   const [registerDialogOpen, setRegisterDialogOpen] = useState(false);
+  const [closeRegisterDialogOpen, setCloseRegisterDialogOpen] = useState(false);
   const [openingBalance, setOpeningBalance] = useState('');
   const [registerNote, setRegisterNote] = useState('');
+  const [closingNote, setClosingNote] = useState('');
+  const [cashCounted, setCashCounted] = useState('');
 
   // Refs for accessing latest state in subscriptions
   const cartItemsRef = useRef(cartItems);
@@ -141,33 +144,50 @@ export default function PosPage() {
 
   // Fetch recent orders
   useEffect(() => {
-    if (!pb || !isAuthenticated) return;
+    if (!pb) return; // Hapus dependensi isAuthenticated sementara
 
     const fetchRecentOrders = async () => {
       try {
-        const result = await pb.collection('orders').getList<Order>(1, 5, {
+        console.log('[v0] Fetching recent orders...');
+        const result = await pb.collection('orders').getList<Order>(1, 10, {
           sort: '-created',
           expand: 'customer_id,order_items_via_order_id.menu_id',
+          filter: '', // Pastikan tidak ada filter yang membatasi
         });
+        console.log('[v0] Recent orders fetched:', result.items.length);
         setRecentOrders(result.items);
-      } catch (error) {
-        console.error('Failed to fetch recent orders:', error);
+      } catch (error: any) {
+        console.error('[v0] Failed to fetch recent orders:', error);
+        // Coba tampilkan error spesifik PocketBase
+        if (error.status === 404) {
+             console.log('[v0] No orders found (404)');
+             setRecentOrders([]);
+        }
       }
     };
 
-    fetchRecentOrders();
+    // Panggil langsung, dan beri jeda sedikit agar auth state stabil
+    const timer = setTimeout(() => {
+        fetchRecentOrders();
+    }, 1000);
 
     // Subscribe to new orders
-    pb.collection('orders').subscribe('*', (e) => {
-       if (e.action === 'create' || e.action === 'update') {
-          fetchRecentOrders();
-       }
-    });
+    try {
+        pb.collection('orders').subscribe('*', (e) => {
+           console.log('[v0] Realtime order update:', e.action);
+           if (e.action === 'create' || e.action === 'update') {
+              fetchRecentOrders();
+           }
+        });
+    } catch (err) {
+        console.error("Failed to subscribe to orders", err);
+    }
 
     return () => {
+        clearTimeout(timer);
         pb.collection('orders').unsubscribe('*');
     };
-  }, [pb, isAuthenticated]);
+  }, [pb]); // Kurangi dependensi agar lebih agresif mengambil data
 
   const filteredMenus = useMemo(() => {
     if (!search.trim()) return menus;
@@ -500,17 +520,31 @@ const qrCodeUrl = qrCodeV2?.url || transaction.actions?.find((a: any) => a.name 
 
   const handleCloseRegister = async () => {
     if (!pb || !registerSession) return;
-    if (!confirm('Apakah Anda yakin ingin menutup Cash Register?')) return;
+    
+    // Validasi input
+    if (cashCounted === '') {
+        toast.error('Masukkan jumlah uang tunai yang dihitung');
+        return;
+    }
 
     try {
       setSaving(true);
+      const counted = parseFloat(cashCounted);
+      const expected = registerSession.current_balance || 0;
+      const difference = counted - expected;
+
       await pb.collection('cash_register_sessions').update(registerSession.id, {
         close_time: new Date().toISOString(),
         status: 'closed',
-        final_balance: registerSession.current_balance, // Simplifikasi, idealnya ada hitungan fisik
+        final_balance: counted,
+        notes: `${registerSession.notes || ''} \n[Closing] Counted: ${counted}, Diff: ${difference}. Note: ${closingNote}`,
       });
+      
       setRegisterSession(null);
-      toast.success('Cash Register ditutup');
+      setCloseRegisterDialogOpen(false);
+      setCashCounted('');
+      setClosingNote('');
+      toast.success('Cash Register berhasil ditutup');
     } catch (error: any) {
        const message = getPocketBaseErrorMessage(error, 'Gagal menutup cash register');
        toast.error(message);
@@ -603,12 +637,12 @@ const qrCodeUrl = qrCodeV2?.url || transaction.actions?.find((a: any) => a.name 
                             <Wallet size={16} className="text-green-500" />
                             <div className="text-xs">
                                 <p className="text-green-500 font-semibold">Register Open</p>
-                                <p className="text-slate-400">Bal: {formatCurrency(registerSession.current_balance)}</p>
+                                <p className="text-slate-400">Bal: {formatCurrency(registerSession.current_balance || 0)}</p>
                             </div>
                             <Button 
                                 size="sm" 
                                 variant="ghost" 
-                                onClick={handleCloseRegister}
+                                onClick={() => setCloseRegisterDialogOpen(true)}
                                 className="h-6 w-6 p-0 ml-1 text-slate-400 hover:text-red-400"
                                 title="Tutup Register"
                             >
@@ -921,6 +955,65 @@ const qrCodeUrl = qrCodeV2?.url || transaction.actions?.find((a: any) => a.name 
                 <Button variant="ghost" onClick={() => setRegisterDialogOpen(false)} className="text-slate-400">Batal</Button>
                 <Button onClick={handleOpenRegister} disabled={saving || !openingBalance} className="bg-orange-500 hover:bg-orange-600 text-white">
                     {saving ? 'Memproses...' : 'Buka Register'}
+                </Button>
+            </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      
+      {/* Close Register Dialog */}
+      <Dialog open={closeRegisterDialogOpen} onOpenChange={setCloseRegisterDialogOpen}>
+        <DialogContent className="sm:max-w-[400px] bg-slate-900 border border-slate-700">
+            <DialogHeader>
+                <DialogTitle className="text-white">Tutup Cash Register</DialogTitle>
+                <DialogDescription className="text-slate-400">
+                    Masukkan jumlah uang fisik di laci (cash count).
+                </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-4 py-4">
+                <div className="bg-slate-800 p-3 rounded-lg flex justify-between items-center text-sm">
+                    <span className="text-slate-400">Saldo Sistem:</span>
+                    <span className="text-white font-bold">{formatCurrency(registerSession?.current_balance || 0)}</span>
+                </div>
+                
+                <div className="space-y-2">
+                    <label className="text-sm font-medium text-slate-300">Total Uang Fisik (Rp)</label>
+                    <Input 
+                        type="number" 
+                        placeholder="0"
+                        value={cashCounted}
+                        onChange={(e) => setCashCounted(e.target.value)}
+                        className="bg-slate-800 border-slate-700 text-white"
+                        autoFocus
+                    />
+                </div>
+                
+                <div className="space-y-2">
+                    <label className="text-sm font-medium text-slate-300">Catatan Penutupan</label>
+                    <Input 
+                        placeholder="Selisih karena kembalian, dll"
+                        value={closingNote}
+                        onChange={(e) => setClosingNote(e.target.value)}
+                        className="bg-slate-800 border-slate-700 text-white"
+                    />
+                </div>
+
+                {cashCounted && (
+                   <div className={`p-3 rounded-lg text-sm flex justify-between items-center ${
+                      parseFloat(cashCounted) - (registerSession?.current_balance || 0) === 0 
+                      ? 'bg-green-500/10 text-green-400' 
+                      : 'bg-red-500/10 text-red-400'
+                   }`}>
+                      <span>Selisih:</span>
+                      <span className="font-bold">
+                        {formatCurrency(parseFloat(cashCounted) - (registerSession?.current_balance || 0))}
+                      </span>
+                   </div>
+                )}
+            </div>
+            <DialogFooter>
+                <Button variant="ghost" onClick={() => setCloseRegisterDialogOpen(false)} className="text-slate-400">Batal</Button>
+                <Button onClick={handleCloseRegister} disabled={saving || !cashCounted} className="bg-red-500 hover:bg-red-600 text-white">
+                    {saving ? 'Memproses...' : 'Tutup Register'}
                 </Button>
             </DialogFooter>
         </DialogContent>
