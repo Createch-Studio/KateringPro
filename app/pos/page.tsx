@@ -204,6 +204,8 @@ export default function PosPage() {
 
   const handleConfirmCheckout = async () => {
     if (paymentMethod === 'qris') {
+      setCheckoutDialogOpen(false);
+      setTimeout(() => setQrisDialogOpen(true), 0);
       await handleQrisCheckout();
     } else {
       await handleStandardCheckout();
@@ -221,6 +223,8 @@ export default function PosPage() {
       toast.error('Pelanggan tidak ditemukan.');
       return;
     }
+
+    setMidtransTransaction(null);
 
     try {
       setSaving(true);
@@ -254,13 +258,12 @@ const qrCodeUrl = qrCodeV2?.url || transaction.actions?.find((a: any) => a.name 
       }
 
       setMidtransTransaction({ ...transaction, qr_code_url: qrCodeUrl, midtrans_order_id: midtransOrderId });
-      setCheckoutDialogOpen(false);
-      setQrisDialogOpen(true);
 
     } catch (error: any) {
       const message = getPocketBaseErrorMessage(error, 'Gagal memproses pembayaran QRIS');
       console.error('[v0] PoS QRIS checkout error:', message);
       toast.error(message);
+      setQrisDialogOpen(false);
     } finally {
       setSaving(false);
     }
