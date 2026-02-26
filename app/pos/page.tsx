@@ -321,15 +321,16 @@ export default function PosPage() {
         throw new Error('URL QR Code tidak ditemukan dari Midtrans.');
       }
 
-      const today = new Date().toISOString().split('T')[0];
+      const today = new Date().toISOString().split('T')[0];  // tetap untuk invoice/invoice_number
+      const now = new Date().toISOString().replace('T', ' ').slice(0, 19);  // "2026-02-26 14:30:45"
       const orderNumber = midtransOrderId;
       const invoiceNumber = `INV-${Date.now().toString().slice(-6)}`;
 
       const newOrderPayload: any = {
         order_number: orderNumber,
         customer_id: selectedCustomerId,
-        order_date: today,
-        event_date: today,
+        order_date: now,   // menyertakan jam
+        event_date: now,   // menyertakan jam
         status: 'confirmed',
         subtotal: subtotal,
         tax: 0,
