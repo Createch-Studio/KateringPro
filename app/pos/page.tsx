@@ -588,7 +588,7 @@ export default function PosPage() {
 
   // Tinggi per item cart ≈ 88px (padding + konten + gap), 5 item = 440px
   const CART_ITEM_HEIGHT = 88;
-  const CART_VISIBLE_ITEMS = 5;
+  const CART_VISIBLE_ITEMS = 4;
   const cartListHeight = CART_ITEM_HEIGHT * CART_VISIBLE_ITEMS;
 
   return (
