@@ -26,8 +26,11 @@ export async function POST(request: Request) {
         return NextResponse.json({ error: 'Server configuration error' }, { status: 500 });
     }
 
-    // Hapus trailing slash dari URL jika ada
-    const cleanPbUrl = pbUrl.endsWith('/') ? pbUrl.slice(0, -1) : pbUrl;
+    // Hapus trailing slash dan '/api' dari URL jika ada
+    let cleanPbUrl = pbUrl.endsWith('/') ? pbUrl.slice(0, -1) : pbUrl;
+    if (cleanPbUrl.endsWith('/api')) {
+        cleanPbUrl = cleanPbUrl.slice(0, -4);
+    }
     
     const pb = new PocketBase(cleanPbUrl);
     pb.autoCancellation(false);
