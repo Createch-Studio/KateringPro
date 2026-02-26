@@ -68,7 +68,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         const res = await pb
           .collection('employees')
           .getList<Employee>(1, 1, {
-            filter: `user_id = "${user.id}" && status = "active"`,
+            filter: `user = "${user.id}" && status = "active"`,
             sort: '-created',
           });
         setEmployee(res.items[0] || null);
@@ -101,7 +101,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         const res = await pb
           .collection('employees')
           .getList<Employee>(1, 1, {
-            filter: `user_id = "${authData.record.id}" && status = "active"`,
+            filter: `user = "${authData.record.id}" && status = "active"`,
             sort: '-created',
           });
         setEmployee(res.items[0] || null);
@@ -142,7 +142,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const res = await pb
         .collection('employees')
         .getList<Employee>(1, 1, {
-          filter: `user_id = "${user.id}" && status = "active"`,
+          filter: `user = "${user.id}" && status = "active"`,
           sort: '-created',
         });
       setEmployee(res.items[0] || null);
