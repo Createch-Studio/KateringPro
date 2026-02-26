@@ -714,100 +714,104 @@ const qrCodeUrl = qrCodeV2?.url || transaction.actions?.find((a: any) => a.name 
             </div>
         </div>
 
-        {/* Right Side: Cart */}
-        <div className="w-full lg:w-96 flex flex-col bg-slate-900 border border-slate-700 rounded-lg h-full max-h-[calc(100vh-140px)] sticky top-4">
-            <div className="p-4 border-b border-slate-800">
-                <h2 className="text-lg font-bold text-white flex items-center gap-2">
-                    <div className="w-2 h-6 bg-orange-500 rounded-full"></div>
-                    Keranjang
-                </h2>
-            </div>
-
-            <div className="flex-1 overflow-y-auto p-4 space-y-3">
-              {cartItems.length === 0 ? (
-                <div className="h-full flex flex-col items-center justify-center text-slate-500 space-y-3 opacity-60">
-                    <div className="w-16 h-16 bg-slate-800 rounded-full flex items-center justify-center">
-                        <Minus size={24} className="text-slate-600" />
-                    </div>
-                    <p>Keranjang kosong</p>
+        {/* Right Side: Cart & Recent Orders Panel */}
+        <div className="w-full lg:w-96 flex flex-col h-full max-h-[calc(100vh-140px)] sticky top-4 gap-4">
+            
+            {/* Cart Section */}
+            <div className="flex flex-col bg-slate-900 border border-slate-700 rounded-lg flex-1 min-h-0 overflow-hidden">
+                <div className="p-4 border-b border-slate-800 shrink-0">
+                    <h2 className="text-lg font-bold text-white flex items-center gap-2">
+                        <div className="w-2 h-6 bg-orange-500 rounded-full"></div>
+                        Keranjang
+                    </h2>
                 </div>
-              ) : (
-                cartItems.map((item) => (
-                    <div
-                      key={item.id}
-                      className="flex gap-3 bg-slate-800/50 p-3 rounded-lg border border-slate-800 hover:border-slate-700 transition-colors"
-                    >
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm font-medium text-white truncate mb-1">
-                          {item.menu.name}
-                        </p>
-                        <p className="text-xs text-orange-400 font-semibold">
-                          {formatCurrency(item.menu.price * item.quantity)}
-                        </p>
-                      </div>
-                      
-                      <div className="flex flex-col items-end gap-2">
-                          <div className="flex items-center bg-slate-900 rounded-lg border border-slate-700 p-0.5">
-                            <button
-                              type="button"
-                              onClick={() => updateQuantity(item.id, -1)}
-                              className="w-7 h-7 flex items-center justify-center rounded text-slate-400 hover:bg-slate-800 hover:text-white transition-colors"
-                            >
-                              <Minus size={14} />
-                            </button>
-                            <span className="w-8 text-center text-sm font-medium text-white">
-                              {item.quantity}
-                            </span>
-                            <button
-                              type="button"
-                              onClick={() => updateQuantity(item.id, 1)}
-                              className="w-7 h-7 flex items-center justify-center rounded text-slate-400 hover:bg-slate-800 hover:text-white transition-colors"
-                            >
-                              <Plus size={14} />
-                            </button>
+
+                <div className="flex-1 overflow-y-auto p-4 space-y-3">
+                  {cartItems.length === 0 ? (
+                    <div className="h-full flex flex-col items-center justify-center text-slate-500 space-y-3 opacity-60 min-h-[200px]">
+                        <div className="w-16 h-16 bg-slate-800 rounded-full flex items-center justify-center">
+                            <Minus size={24} className="text-slate-600" />
+                        </div>
+                        <p>Keranjang kosong</p>
+                    </div>
+                  ) : (
+                    cartItems.map((item) => (
+                        <div
+                          key={item.id}
+                          className="flex gap-3 bg-slate-800/50 p-3 rounded-lg border border-slate-800 hover:border-slate-700 transition-colors"
+                        >
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-medium text-white truncate mb-1">
+                              {item.menu.name}
+                            </p>
+                            <p className="text-xs text-orange-400 font-semibold">
+                              {formatCurrency(item.menu.price * item.quantity)}
+                            </p>
                           </div>
                           
-                          <button
-                              onClick={() => removeFromCart(item.id)}
-                              className="text-xs text-red-400 hover:text-red-300 flex items-center gap-1 opacity-60 hover:opacity-100 transition-opacity"
-                          >
-                              <Trash2 size={12} /> Hapus
-                          </button>
-                      </div>
-                    </div>
-                  ))
-              )}
-            </div>
-
-            <div className="p-4 bg-slate-900 border-t border-slate-800 space-y-4">
-                <div className="space-y-2 text-sm">
-                    <div className="flex justify-between text-slate-400">
-                        <span>Subtotal</span>
-                        <span>{formatCurrency(subtotal)}</span>
-                    </div>
-                    <div className="flex justify-between text-slate-400">
-                        <span>Pajak (0%)</span>
-                        <span>{formatCurrency(0)}</span>
-                    </div>
-                    <div className="flex justify-between text-lg font-bold text-white pt-2 border-t border-slate-800">
-                        <span>Total</span>
-                        <span className="text-orange-400">{formatCurrency(total)}</span>
-                    </div>
+                          <div className="flex flex-col items-end gap-2">
+                              <div className="flex items-center bg-slate-900 rounded-lg border border-slate-700 p-0.5">
+                                <button
+                                  type="button"
+                                  onClick={() => updateQuantity(item.id, -1)}
+                                  className="w-7 h-7 flex items-center justify-center rounded text-slate-400 hover:bg-slate-800 hover:text-white transition-colors"
+                                >
+                                  <Minus size={14} />
+                                </button>
+                                <span className="w-8 text-center text-sm font-medium text-white">
+                                  {item.quantity}
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={() => updateQuantity(item.id, 1)}
+                                  className="w-7 h-7 flex items-center justify-center rounded text-slate-400 hover:bg-slate-800 hover:text-white transition-colors"
+                                >
+                                  <Plus size={14} />
+                                </button>
+                              </div>
+                              
+                              <button
+                                  onClick={() => removeFromCart(item.id)}
+                                  className="text-xs text-red-400 hover:text-red-300 flex items-center gap-1 opacity-60 hover:opacity-100 transition-opacity"
+                              >
+                                  <Trash2 size={12} /> Hapus
+                              </button>
+                          </div>
+                        </div>
+                      ))
+                  )}
                 </div>
 
-                <Button
-                    type="button"
-                    onClick={handleCheckout}
-                    disabled={!canCheckout}
-                    className="w-full h-12 text-lg font-bold bg-orange-500 hover:bg-orange-600 text-white shadow-lg shadow-orange-500/20 disabled:shadow-none disabled:opacity-50"
-                >
-                    {registerSession ? 'Bayar Sekarang' : 'Buka Register Dulu'}
-                </Button>
+                <div className="p-4 bg-slate-900 border-t border-slate-800 space-y-4 shrink-0">
+                    <div className="space-y-2 text-sm">
+                        <div className="flex justify-between text-slate-400">
+                            <span>Subtotal</span>
+                            <span>{formatCurrency(subtotal)}</span>
+                        </div>
+                        <div className="flex justify-between text-slate-400">
+                            <span>Pajak (0%)</span>
+                            <span>{formatCurrency(0)}</span>
+                        </div>
+                        <div className="flex justify-between text-lg font-bold text-white pt-2 border-t border-slate-800">
+                            <span>Total</span>
+                            <span className="text-orange-400">{formatCurrency(total)}</span>
+                        </div>
+                    </div>
+
+                    <Button
+                        type="button"
+                        onClick={handleCheckout}
+                        disabled={!canCheckout}
+                        className="w-full h-12 text-lg font-bold bg-orange-500 hover:bg-orange-600 text-white shadow-lg shadow-orange-500/20 disabled:shadow-none disabled:opacity-50"
+                    >
+                        {registerSession ? 'Bayar Sekarang' : 'Buka Register Dulu'}
+                    </Button>
+                </div>
             </div>
             
-            {/* Recent Orders Compact View */}
-            <div className="mt-4 border-t border-slate-800 pt-4">
-              <h3 className="text-sm font-semibold text-white mb-2 flex items-center gap-2">
+            {/* Recent Orders Compact View - Separate Container, Auto Height */}
+            <div className="bg-slate-900 border border-slate-700 rounded-lg p-4 shrink-0">
+              <h3 className="text-sm font-semibold text-white mb-3 flex items-center gap-2">
                 <div className="w-2 h-4 bg-blue-500 rounded-full"></div>
                 Pesanan Terakhir
               </h3>
@@ -841,7 +845,7 @@ const qrCodeUrl = qrCodeV2?.url || transaction.actions?.find((a: any) => a.name 
                   </div>
                 ))}
                 {recentOrders.length === 0 && (
-                  <p className="text-slate-500 text-xs text-center py-4">Belum ada pesanan.</p>
+                  <p className="text-slate-500 text-xs text-center py-2">Belum ada pesanan.</p>
                 )}
               </div>
             </div>
