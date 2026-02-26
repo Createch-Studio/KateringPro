@@ -297,6 +297,7 @@ const qrCodeUrl = qrCodeV2?.url || transaction.actions?.find((a: any) => a.name 
         total_amount: total,
         status: 'sent',
         notes: `Invoice PoS (QRIS) ${orderNumber}`,
+        midtrans_order_id: midtransOrderId,
       };
 
       const newInvoice = (await pb
