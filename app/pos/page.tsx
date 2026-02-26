@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, useRef } from 'react';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { useAuth } from '@/lib/auth-context';
 import { CashRegisterSession, Customer, Invoice, MenuItem, Order, Payment } from '@/lib/types';
@@ -15,7 +15,7 @@ import {
 } from '@/components/ui/dialog';
 import { formatCurrency, getPocketBaseErrorMessage } from '@/lib/api';
 import { toast } from 'sonner';
-import { Search, Minus, Plus, Trash2 } from 'lucide-react';
+import { Search, Minus, Plus, Trash2, CheckCircle2 } from 'lucide-react';
 
 interface CartItem {
   id: string;
@@ -41,6 +41,24 @@ export default function PosPage() {
   const [pendingInvoiceId, setPendingInvoiceId] = useState<string | null>(null);
   const [paymentMethod, setPaymentMethod] = useState<PosPaymentMethod>('cash');
   const [selectedCustomerId, setSelectedCustomerId] = useState('');
+  
+  const [successDialogOpen, setSuccessDialogOpen] = useState(false);
+  const [lastOrderDetails, setLastOrderDetails] = useState<any>(null);
+
+  // Refs for accessing latest state in subscriptions
+  const cartItemsRef = useRef(cartItems);
+  const totalRef = useRef(0);
+  const midtransTransactionRef = useRef(midtransTransaction);
+  const customersRef = useRef(customers);
+  const selectedCustomerIdRef = useRef(selectedCustomerId);
+
+  useEffect(() => {
+    cartItemsRef.current = cartItems;
+    totalRef.current = cartItems.reduce((sum, item) => sum + item.menu.price * item.quantity, 0);
+    midtransTransactionRef.current = midtransTransaction;
+    customersRef.current = customers;
+    selectedCustomerIdRef.current = selectedCustomerId;
+  }, [cartItems, midtransTransaction, customers, selectedCustomerId]);
 
   const cashierName = employee?.name || user?.email || 'Kasir';
 
@@ -420,7 +438,23 @@ const qrCodeUrl = qrCodeV2?.url || transaction.actions?.find((a: any) => a.name 
     if (e.record.id === pendingInvoiceId && e.record.status === 'paid') {
       console.log(`[v0] Payment for invoice ${pendingInvoiceId} confirmed via real-time update.`);
       toast.success('Pembayaran QRIS berhasil diterima!');
+
+      // Gunakan Refs untuk mengambil data terbaru tanpa stale closure
+      const currentCartItems = cartItemsRef.current;
+      const currentTotal = totalRef.current;
+      const currentTransaction = midtransTransactionRef.current;
+      const currentCustomer = customersRef.current.find(c => c.id === selectedCustomerIdRef.current);
       
+      setLastOrderDetails({
+        orderId: currentTransaction?.midtrans_order_id || pendingInvoiceId || 'UNKNOWN',
+        date: new Date().toLocaleString('id-ID'),
+        customerName: currentCustomer?.name || 'Guest',
+        items: [...currentCartItems], 
+        total: currentTotal,
+        paymentMethod: 'QRIS'
+      });
+      
+      setSuccessDialogOpen(true);
       setQrisDialogOpen(false);
       setMidtransTransaction(null);
       setPendingInvoiceId(null);
@@ -436,7 +470,7 @@ const qrCodeUrl = qrCodeV2?.url || transaction.actions?.find((a: any) => a.name 
     console.log(`[v0] Unsubscribing from invoice: ${pendingInvoiceId}`);
     pb.collection('invoices').unsubscribe(pendingInvoiceId);
   };
-}, [pb, pendingInvoiceId, setCartItems, setSelectedCustomerId]);
+}, [pb, pendingInvoiceId]);
 
   return (
     <MainLayout title="PoS (Point of Sale)">
@@ -718,6 +752,71 @@ const qrCodeUrl = qrCodeV2?.url || transaction.actions?.find((a: any) => a.name 
         </Button>
       </div>
     </div>
+  </DialogContent>
+</Dialog>
+
+<Dialog open={successDialogOpen} onOpenChange={setSuccessDialogOpen}>
+  <DialogContent className="sm:max-w-[420px] bg-slate-900 border border-slate-700">
+    <DialogHeader>
+      <div className="mx-auto bg-green-500/10 p-3 rounded-full mb-2">
+        <CheckCircle2 className="h-8 w-8 text-green-500" />
+      </div>
+      <DialogTitle className="text-center text-white text-xl">Pembayaran Berhasil!</DialogTitle>
+      <DialogDescription className="text-center text-slate-400">
+        Transaksi telah berhasil diproses.
+      </DialogDescription>
+    </DialogHeader>
+
+    {lastOrderDetails && (
+      <div className="space-y-4 mt-2">
+        <div className="bg-slate-800/50 rounded-lg p-4 space-y-3 text-sm">
+          <div className="flex justify-between">
+            <span className="text-slate-400">Order ID</span>
+            <span className="text-slate-200 font-mono">{lastOrderDetails.orderId}</span>
+          </div>
+          <div className="flex justify-between">
+            <span className="text-slate-400">Tanggal</span>
+            <span className="text-slate-200">{lastOrderDetails.date}</span>
+          </div>
+          <div className="flex justify-between">
+            <span className="text-slate-400">Pelanggan</span>
+            <span className="text-slate-200">{lastOrderDetails.customerName}</span>
+          </div>
+          <div className="flex justify-between">
+             <span className="text-slate-400">Metode</span>
+             <span className="text-slate-200 font-medium">{lastOrderDetails.paymentMethod}</span>
+          </div>
+        </div>
+
+        <div className="border-t border-slate-800 pt-3">
+            <p className="text-xs font-medium text-slate-400 mb-2 uppercase tracking-wider">Detail Item</p>
+            <div className="space-y-2 max-h-40 overflow-y-auto">
+                {lastOrderDetails.items.map((item: any, idx: number) => (
+                    <div key={idx} className="flex justify-between text-sm">
+                        <span className="text-slate-300">
+                            {item.quantity}x {item.menu.name}
+                        </span>
+                        <span className="text-slate-200">
+                            {formatCurrency(item.menu.price * item.quantity)}
+                        </span>
+                    </div>
+                ))}
+            </div>
+        </div>
+        
+        <div className="border-t border-slate-800 pt-3 flex justify-between items-center">
+            <span className="font-semibold text-slate-200">Total Bayar</span>
+            <span className="font-bold text-xl text-orange-400">{formatCurrency(lastOrderDetails.total)}</span>
+        </div>
+
+        <Button 
+            className="w-full bg-slate-800 hover:bg-slate-700 text-white mt-4"
+            onClick={() => setSuccessDialogOpen(false)}
+        >
+            Tutup
+        </Button>
+      </div>
+    )}
   </DialogContent>
 </Dialog>
       </div>

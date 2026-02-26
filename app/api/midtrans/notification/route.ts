@@ -135,12 +135,49 @@ export async function POST(request: Request) {
 
             // 4. Update status pembayaran di PocketBase menjadi 'paid'
             if (invoice.status !== 'paid') {
+                // Update Invoice
                 await pb.collection('invoices').update(invoice.id, {
                     status: 'paid',
                     midtrans_transaction_id: body.transaction_id, // Simpan ID transaksi Midtrans
                     payment_details: JSON.stringify(body), // Simpan seluruh payload notifikasi untuk audit
                 });
                 console.log(`Invoice ${invoice.id} for order ${orderId} successfully updated to 'paid'.`);
+
+                // Update Order Status ke 'completed'
+                if (invoice.order_id) {
+                    try {
+                        await pb.collection('orders').update(invoice.order_id, {
+                            status: 'completed',
+                            paid_amount: parseFloat(body.gross_amount), // Update jumlah terbayar
+                            payment_type: 'qris'
+                        });
+                        console.log(`Order ${invoice.order_id} successfully updated to 'completed'.`);
+                    } catch (orderErr) {
+                        console.error(`Failed to update order ${invoice.order_id} status:`, orderErr);
+                    }
+                }
+
+                // Buat Record Pembayaran (Payments Collection)
+                try {
+                    const paymentPayload = {
+                        invoice_id: invoice.id,
+                        order_id: invoice.order_id,
+                        payment_date: new Date().toISOString(),
+                        amount: parseFloat(body.gross_amount),
+                        method: 'qris',
+                        payment_type: 'full_payment', // Asumsi QRIS POS selalu lunas
+                        reference_number: body.transaction_id,
+                        bank_name: body.acquirer || 'gopay', // Midtrans biasanya kirim 'gopay' atau nama bank
+                        status: 'verified',
+                        notes: `Midtrans QRIS Payment - Order ID: ${orderId}`
+                    };
+                    
+                    await pb.collection('payments').create(paymentPayload);
+                    console.log(`Payment record created for invoice ${invoice.id}`);
+                } catch (paymentErr) {
+                    console.error(`Failed to create payment record for invoice ${invoice.id}:`, paymentErr);
+                }
+
             } else {
                 console.log(`Invoice ${invoice.id} for order ${orderId} was already 'paid'. Ignoring notification.`);
             }
