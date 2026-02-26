@@ -806,12 +806,12 @@ const qrCodeUrl = qrCodeV2?.url || transaction.actions?.find((a: any) => a.name 
             </div>
             
             {/* Recent Orders Compact View */}
-            <div className="mt-4 border-t border-slate-800 pt-4 flex-1 min-h-0 overflow-hidden flex flex-col">
+            <div className="mt-4 border-t border-slate-800 pt-4">
               <h3 className="text-sm font-semibold text-white mb-2 flex items-center gap-2">
                 <div className="w-2 h-4 bg-blue-500 rounded-full"></div>
                 Pesanan Terakhir
               </h3>
-              <div className="flex-1 overflow-y-auto space-y-2 pr-1">
+              <div className="space-y-2">
                 {recentOrders.map((order) => (
                   <div key={order.id} className="bg-slate-800/30 border border-slate-800 rounded-lg p-2 text-xs hover:bg-slate-800/50 transition-colors flex justify-between items-center group">
                     <div>
@@ -850,7 +850,7 @@ const qrCodeUrl = qrCodeV2?.url || transaction.actions?.find((a: any) => a.name 
 
       {/* View Order Dialog */}
       <Dialog open={orderDialogOpen} onOpenChange={setOrderDialogOpen}>
-        <DialogContent className="sm:max-w-[500px] bg-slate-900 border border-slate-700 max-h-[80vh] overflow-y-auto">
+        <DialogContent className="sm:max-w-[500px] bg-slate-900 border border-slate-700">
           <DialogHeader>
             <DialogTitle className="text-white">Detail Pesanan</DialogTitle>
           </DialogHeader>
@@ -878,7 +878,11 @@ const qrCodeUrl = qrCodeV2?.url || transaction.actions?.find((a: any) => a.name 
                <div className="grid grid-cols-2 gap-4 text-sm">
                   <div>
                     <p className="text-slate-400 text-xs">Tanggal</p>
-                    <p className="text-slate-200">{new Date(selectedOrder.created).toLocaleString('id-ID')}</p>
+                    <p className="text-slate-200">
+                        {selectedOrder.order_date ? new Date(selectedOrder.order_date).toLocaleDateString('id-ID', {
+                            day: 'numeric', month: 'short', year: 'numeric'
+                        }) : '-'}
+                    </p>
                   </div>
                   <div>
                     <p className="text-slate-400 text-xs">Pelanggan</p>
