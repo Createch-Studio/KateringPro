@@ -144,39 +144,49 @@ export default function PosPage() {
 
   // Fetch recent orders
   useEffect(() => {
-    if (!pb) return; // Hapus dependensi isAuthenticated sementara
+    // Tunggu sampai auth siap ATAU pb sudah terinisialisasi
+    if (!pb) return;
 
     const fetchRecentOrders = async () => {
       try {
         console.log('[v0] Fetching recent orders...');
+        
+        // Coba fetch dengan opsi requestKey: null untuk mematikan auto-cancel
         const result = await pb.collection('orders').getList<Order>(1, 10, {
           sort: '-created',
           expand: 'customer_id,order_items_via_order_id.menu_id',
-          filter: '', // Pastikan tidak ada filter yang membatasi
+          requestKey: null,
         });
+        
         console.log('[v0] Recent orders fetched:', result.items.length);
         setRecentOrders(result.items);
       } catch (error: any) {
         console.error('[v0] Failed to fetch recent orders:', error);
-        // Coba tampilkan error spesifik PocketBase
-        if (error.status === 404) {
+        
+        // Handle 403 Forbidden (Auth issue)
+        if (error.status === 403) {
+             toast.error('Gagal memuat pesanan: Akses ditolak. Cek permission.');
+        } 
+        // Handle 404 Not Found (Empty or wrong collection)
+        else if (error.status === 404) {
              console.log('[v0] No orders found (404)');
              setRecentOrders([]);
         }
       }
     };
 
-    // Panggil langsung, dan beri jeda sedikit agar auth state stabil
+    // Delay sedikit untuk memastikan auth token terpasang
     const timer = setTimeout(() => {
         fetchRecentOrders();
-    }, 1000);
+    }, 1500);
 
     // Subscribe to new orders
     try {
         pb.collection('orders').subscribe('*', (e) => {
            console.log('[v0] Realtime order update:', e.action);
            if (e.action === 'create' || e.action === 'update') {
-              fetchRecentOrders();
+              // Delay fetch setelah update untuk menghindari race condition
+              setTimeout(fetchRecentOrders, 500);
            }
         });
     } catch (err) {
@@ -187,7 +197,7 @@ export default function PosPage() {
         clearTimeout(timer);
         pb.collection('orders').unsubscribe('*');
     };
-  }, [pb]); // Kurangi dependensi agar lebih agresif mengambil data
+  }, [pb]); // Gunakan pb sebagai dependensi utama
 
   const filteredMenus = useMemo(() => {
     if (!search.trim()) return menus;
