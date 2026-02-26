@@ -46,6 +46,11 @@ export default function PosPage() {
   const [successDialogOpen, setSuccessDialogOpen] = useState(false);
   const [lastOrderDetails, setLastOrderDetails] = useState<any>(null);
 
+  // Recent Orders State
+  const [recentOrders, setRecentOrders] = useState<Order[]>([]);
+  const [orderDialogOpen, setOrderDialogOpen] = useState(false);
+  const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
+
   // Cash Register State
   const [registerDialogOpen, setRegisterDialogOpen] = useState(false);
   const [openingBalance, setOpeningBalance] = useState('');
@@ -133,6 +138,36 @@ export default function PosPage() {
 
     fetchData();
   }, [pb, isAuthenticated, user]);
+
+  // Fetch recent orders
+  useEffect(() => {
+    if (!pb || !isAuthenticated) return;
+
+    const fetchRecentOrders = async () => {
+      try {
+        const result = await pb.collection('orders').getList<Order>(1, 5, {
+          sort: '-created',
+          expand: 'customer_id,order_items_via_order_id.menu_id',
+        });
+        setRecentOrders(result.items);
+      } catch (error) {
+        console.error('Failed to fetch recent orders:', error);
+      }
+    };
+
+    fetchRecentOrders();
+
+    // Subscribe to new orders
+    pb.collection('orders').subscribe('*', (e) => {
+       if (e.action === 'create' || e.action === 'update') {
+          fetchRecentOrders();
+       }
+    });
+
+    return () => {
+        pb.collection('orders').unsubscribe('*');
+    };
+  }, [pb, isAuthenticated]);
 
   const filteredMenus = useMemo(() => {
     if (!search.trim()) return menus;
@@ -527,6 +562,19 @@ const qrCodeUrl = qrCodeV2?.url || transaction.actions?.find((a: any) => a.name 
     }
   };
 
+  const handleViewOrder = async (order: Order) => {
+    try {
+      // Fetch full order details with items
+      const fullOrder = await pb!.collection('orders').getOne(order.id, {
+        expand: 'customer_id,order_items_via_order_id.menu_id',
+      });
+      setSelectedOrder(fullOrder);
+      setOrderDialogOpen(true);
+    } catch (error) {
+      toast.error('Gagal memuat detail pesanan');
+    }
+  };
+
   return (
     <PosLayout title="PoS (Point of Sale)">
       <div className="h-full flex flex-col lg:flex-row gap-6">
@@ -725,8 +773,118 @@ const qrCodeUrl = qrCodeV2?.url || transaction.actions?.find((a: any) => a.name 
                     {registerSession ? 'Bayar Sekarang' : 'Buka Register Dulu'}
                 </Button>
             </div>
+            
+            {/* Recent Orders Compact View */}
+            <div className="mt-4 border-t border-slate-800 pt-4 flex-1 min-h-0 overflow-hidden flex flex-col">
+              <h3 className="text-sm font-semibold text-white mb-2 flex items-center gap-2">
+                <div className="w-2 h-4 bg-blue-500 rounded-full"></div>
+                Pesanan Terakhir
+              </h3>
+              <div className="flex-1 overflow-y-auto space-y-2 pr-1">
+                {recentOrders.map((order) => (
+                  <div key={order.id} className="bg-slate-800/30 border border-slate-800 rounded-lg p-2 text-xs hover:bg-slate-800/50 transition-colors flex justify-between items-center group">
+                    <div>
+                      <div className="flex items-center gap-2 mb-1">
+                        <span className="font-mono text-slate-400">#{order.order_number.slice(-4)}</span>
+                        <span className={`px-1.5 py-0.5 rounded text-[10px] uppercase font-bold ${
+                          order.status === 'completed' ? 'bg-green-500/20 text-green-400' :
+                          order.status === 'confirmed' ? 'bg-blue-500/20 text-blue-400' :
+                          order.status === 'cancelled' ? 'bg-red-500/20 text-red-400' :
+                          'bg-slate-700 text-slate-300'
+                        }`}>
+                          {order.status}
+                        </span>
+                      </div>
+                      <div className="text-slate-300 font-medium">
+                        {formatCurrency(order.total)}
+                      </div>
+                    </div>
+                    <Button 
+                      size="sm" 
+                      variant="ghost" 
+                      onClick={() => handleViewOrder(order)}
+                      className="h-7 px-2 text-[10px] text-blue-400 hover:text-blue-300 hover:bg-blue-500/10 opacity-0 group-hover:opacity-100 transition-opacity"
+                    >
+                      Lihat
+                    </Button>
+                  </div>
+                ))}
+                {recentOrders.length === 0 && (
+                  <p className="text-slate-500 text-xs text-center py-4">Belum ada pesanan.</p>
+                )}
+              </div>
+            </div>
         </div>
       </div>
+
+      {/* View Order Dialog */}
+      <Dialog open={orderDialogOpen} onOpenChange={setOrderDialogOpen}>
+        <DialogContent className="sm:max-w-[500px] bg-slate-900 border border-slate-700 max-h-[80vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="text-white">Detail Pesanan</DialogTitle>
+          </DialogHeader>
+          
+          {selectedOrder && (
+            <div className="space-y-4">
+               <div className="flex justify-between items-start bg-slate-800 p-3 rounded-lg">
+                  <div>
+                    <p className="text-slate-400 text-xs">No. Order</p>
+                    <p className="text-white font-mono font-bold">{selectedOrder.order_number}</p>
+                  </div>
+                  <div className="text-right">
+                    <p className="text-slate-400 text-xs">Status</p>
+                    <span className={`inline-block px-2 py-0.5 rounded text-xs font-bold ${
+                          selectedOrder.status === 'completed' ? 'bg-green-500/20 text-green-400' :
+                          selectedOrder.status === 'confirmed' ? 'bg-blue-500/20 text-blue-400' :
+                          selectedOrder.status === 'cancelled' ? 'bg-red-500/20 text-red-400' :
+                          'bg-slate-700 text-slate-300'
+                        }`}>
+                        {selectedOrder.status}
+                    </span>
+                  </div>
+               </div>
+
+               <div className="grid grid-cols-2 gap-4 text-sm">
+                  <div>
+                    <p className="text-slate-400 text-xs">Tanggal</p>
+                    <p className="text-slate-200">{new Date(selectedOrder.created).toLocaleString('id-ID')}</p>
+                  </div>
+                  <div>
+                    <p className="text-slate-400 text-xs">Pelanggan</p>
+                    <p className="text-slate-200">{(selectedOrder.expand?.customer_id as Customer)?.name || 'Guest'}</p>
+                  </div>
+               </div>
+
+               <div className="border-t border-slate-800 pt-3">
+                  <p className="text-xs font-medium text-slate-400 mb-2 uppercase tracking-wider">Item Pesanan</p>
+                  <div className="space-y-2">
+                    {selectedOrder.expand?.order_items_via_order_id?.map((item: any) => (
+                      <div key={item.id} className="flex justify-between text-sm">
+                        <span className="text-slate-300">
+                           {item.quantity}x {(item.expand?.menu_id as MenuItem)?.name || 'Unknown Item'}
+                        </span>
+                        <span className="text-slate-200 font-medium">
+                           {formatCurrency(item.total)}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+               </div>
+
+               <div className="border-t border-slate-800 pt-3 flex justify-between items-center">
+                  <span className="font-bold text-slate-200">Total</span>
+                  <span className="font-bold text-xl text-orange-400">{formatCurrency(selectedOrder.total)}</span>
+               </div>
+               
+               <div className="flex justify-end pt-2">
+                  <Button variant="outline" onClick={() => setOrderDialogOpen(false)} className="border-slate-700 text-slate-300">
+                    Tutup
+                  </Button>
+               </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
 
       {/* Register Dialog */}
       <Dialog open={registerDialogOpen} onOpenChange={setRegisterDialogOpen}>
