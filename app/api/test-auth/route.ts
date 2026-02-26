@@ -36,16 +36,33 @@ export async function GET() {
         }
 
         const startTime = Date.now();
-        await pb.admins.authWithPassword(adminEmail, adminPassword);
+        let authMethod = 'admins.authWithPassword';
+        try {
+            // Coba login sebagai admin (PB < v0.23)
+            await pb.admins.authWithPassword(adminEmail, adminPassword);
+        } catch (adminError: any) {
+            // Jika gagal dengan 404, coba login sebagai superuser (PB >= v0.23)
+            if (adminError.status === 404) {
+                try {
+                    authMethod = '_superusers.authWithPassword';
+                    await pb.collection('_superusers').authWithPassword(adminEmail, adminPassword);
+                } catch (superuserError: any) {
+                    throw superuserError; // Lempar error asli jika superuser juga gagal
+                }
+            } else {
+                throw adminError; // Lempar error asli jika bukan 404
+            }
+        }
         const duration = Date.now() - startTime;
 
         return NextResponse.json({
             status: 'success',
-            message: 'Berhasil login sebagai Admin!',
+            message: 'Berhasil login sebagai Admin/Superuser!',
             details: {
                 url: cleanPbUrl,
                 original_url: pbUrl,
                 email: adminEmail,
+                auth_method: authMethod,
                 duration: `${duration}ms`,
                 token_preview: pb.authStore.token.substring(0, 10) + '...'
             }

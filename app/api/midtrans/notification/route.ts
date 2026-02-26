@@ -45,7 +45,21 @@ export async function POST(request: Request) {
             return NextResponse.json({ error: 'Server configuration error' }, { status: 500 });
         }
 
-        await pb.admins.authWithPassword(adminEmail, adminPassword);
+        try {
+            // Coba login sebagai admin (PB < v0.23)
+            await pb.admins.authWithPassword(adminEmail, adminPassword);
+        } catch (adminError: any) {
+            // Jika gagal dengan 404, coba login sebagai superuser (PB >= v0.23)
+            if (adminError.status === 404) {
+                try {
+                    await pb.collection('_superusers').authWithPassword(adminEmail, adminPassword);
+                } catch (superuserError: any) {
+                    throw superuserError; // Lempar error asli jika superuser juga gagal
+                }
+            } else {
+                throw adminError; // Lempar error asli jika bukan 404
+            }
+        }
     } catch (authError) {
         console.error('Failed to authenticate as admin:', authError);
         return NextResponse.json({ error: 'Database authentication failed' }, { status: 500 });
