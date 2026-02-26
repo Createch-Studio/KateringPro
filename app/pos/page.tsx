@@ -924,6 +924,7 @@ const qrCodeUrl = qrCodeV2?.url || transaction.actions?.find((a: any) => a.name 
         >
             Tutup
         </Button>
+      </div>
     )}
   </DialogContent>
 </Dialog>
