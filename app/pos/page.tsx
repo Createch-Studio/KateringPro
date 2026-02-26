@@ -142,38 +142,37 @@ export default function PosPage() {
     fetchData();
   }, [pb, isAuthenticated, user]);
 
-  // Fetch recent orders
+  // Fetch recent orders - SYNCED WITH app/orders/page.tsx
   useEffect(() => {
-    // Tunggu sampai auth siap ATAU pb sudah terinisialisasi
-    if (!pb) return;
+    if (!isAuthenticated || !pb) {
+      console.log('[v0] PoS: Not authenticated or pb not ready');
+      return;
+    }
 
     const fetchRecentOrders = async () => {
       try {
-        console.log('[v0] Fetching recent orders...');
+        console.log('[v0] PoS: Fetching recent orders...');
         
-        // Hapus 'expand' sementara untuk isolasi masalah relasi yang mungkin tidak valid
-        // Hapus 'sort' sementara untuk melihat raw data
-        const result = await pb.collection('orders').getList<Order>(1, 10, {
-          sort: '-created',
-          requestKey: null,
-        });
-        
-        console.log('[v0] Recent orders fetched RAW:', result.items.length, result.items);
+        // Menggunakan opsi yang sama persis dengan app/orders/page.tsx
+        const options: any = {
+          sort: '-order_date',
+          // Tidak perlu filter tanggal di PoS, ambil 5 terbaru saja
+        };
+
+        const result = await pb.collection('orders').getList<Order>(1, 5, options);
+        console.log('[v0] PoS: Recent orders fetched:', result.items.length);
         setRecentOrders(result.items);
       } catch (error: any) {
-        console.error('[v0] Failed to fetch recent orders:', error);
-        // Tampilkan detail error di toast untuk debugging user
-        toast.error(`Error Fetch: ${error.message} (${error.status})`);
+        console.error('[v0] PoS: Failed to fetch recent orders:', error);
+        toast.error(`Gagal memuat pesanan: ${error.message}`);
       }
     };
 
-    // Panggil langsung tanpa delay untuk tes
     fetchRecentOrders();
 
     // Subscribe to new orders
     try {
         pb.collection('orders').subscribe('*', (e) => {
-           console.log('[v0] Realtime order update:', e.action);
            if (e.action === 'create' || e.action === 'update') {
               fetchRecentOrders();
            }
@@ -185,7 +184,7 @@ export default function PosPage() {
     return () => {
         pb.collection('orders').unsubscribe('*');
     };
-  }, [pb]); // Gunakan pb sebagai dependensi utama
+  }, [isAuthenticated, pb]); // Dependensi dikembalikan seperti app/orders/page.tsx
 
   const filteredMenus = useMemo(() => {
     if (!search.trim()) return menus;
