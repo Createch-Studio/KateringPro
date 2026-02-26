@@ -10,8 +10,11 @@ export async function GET() {
     if (!adminEmail) return NextResponse.json({ status: 'error', message: 'POCKETBASE_ADMIN_EMAIL missing' });
     if (!adminPassword) return NextResponse.json({ status: 'error', message: 'POCKETBASE_ADMIN_PASSWORD missing' });
 
+    // Hapus trailing slash dari URL jika ada
+    const cleanPbUrl = pbUrl.endsWith('/') ? pbUrl.slice(0, -1) : pbUrl;
+
     try {
-        const pb = new PocketBase(pbUrl);
+        const pb = new PocketBase(cleanPbUrl);
         pb.autoCancellation(false);
         
         const startTime = Date.now();

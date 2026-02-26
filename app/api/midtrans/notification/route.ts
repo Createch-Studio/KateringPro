@@ -25,8 +25,11 @@ export async function POST(request: Request) {
         console.error('NEXT_PUBLIC_POCKETBASE_URL is missing');
         return NextResponse.json({ error: 'Server configuration error' }, { status: 500 });
     }
+
+    // Hapus trailing slash dari URL jika ada
+    const cleanPbUrl = pbUrl.endsWith('/') ? pbUrl.slice(0, -1) : pbUrl;
     
-    const pb = new PocketBase(pbUrl);
+    const pb = new PocketBase(cleanPbUrl);
     pb.autoCancellation(false);
 
     try {
