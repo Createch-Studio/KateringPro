@@ -26,6 +26,7 @@ export default function CashRegisterPage() {
   const [historyLoading, setHistoryLoading] = useState(false);
   const [historyPage, setHistoryPage] = useState(1);
   const [historyTotalPages, setHistoryTotalPages] = useState(1);
+  const [openDialogOpen, setOpenDialogOpen] = useState(false);
   const [closeDialogOpen, setCloseDialogOpen] = useState(false);
   const [viewDialogOpen, setViewDialogOpen] = useState(false);
   const [selectedHistory, setSelectedHistory] = useState<CashRegisterSession | null>(null);
@@ -114,6 +115,7 @@ export default function CashRegisterPage() {
         status: 'open',
       })) as CashRegisterSession;
       setSession(created);
+      setOpenDialogOpen(false);
       await fetchHistory();
       toast.success('Cash register berhasil dibuka');
     } catch (error: any) {
@@ -228,32 +230,15 @@ export default function CashRegisterPage() {
                   Cash register belum dibuka
                 </p>
                 <p className="text-xs text-slate-400 mb-4">
-                  Masukkan saldo awal kas di laci sebelum mulai bertransaksi di PoS.
+                  Klik tombol di bawah untuk membuka cash register dan memulai sesi transaksi.
                 </p>
-                <div className="flex items-center gap-3">
-                  <div className="flex-1">
-                    <label className="block text-xs font-medium text-slate-400 mb-1">
-                      Saldo awal kas (Rp)
-                    </label>
-                    <Input
-                      type="number"
-                      min={0}
-                      value={openingBalance}
-                      onChange={(e) => setOpeningBalance(Number(e.target.value) || 0)}
-                      className="bg-slate-900 border-slate-700 text-white"
-                    />
-                  </div>
-                  <div className="pt-5">
-                    <Button
-                      type="button"
-                      onClick={handleOpen}
-                      disabled={saving}
-                      className="bg-green-600 hover:bg-green-700 text-white"
-                    >
-                      {saving ? 'Membuka...' : 'Buka Cash Register'}
-                    </Button>
-                  </div>
-                </div>
+                <Button
+                  type="button"
+                  onClick={() => setOpenDialogOpen(true)}
+                  className="bg-green-600 hover:bg-green-700 text-white"
+                >
+                  Buka Cash Register
+                </Button>
               </div>
             </div>
           ) : (
@@ -396,7 +381,7 @@ export default function CashRegisterPage() {
                             type="button"
                             size="sm"
                             variant="outline"
-                            className="border-slate-700 text-slate-200 hover:text-white"
+                            className="border-blue-600 text-blue-400 hover:bg-blue-600 hover:text-white"
                             onClick={() => {
                               setSelectedHistory(item);
                               setViewDialogOpen(true);
@@ -444,6 +429,50 @@ export default function CashRegisterPage() {
             </div>
           )}
         </div>
+
+        <Dialog open={openDialogOpen} onOpenChange={setOpenDialogOpen}>
+          <DialogContent className="sm:max-w-[420px] bg-slate-900 border border-slate-700">
+            <DialogHeader>
+              <DialogTitle className="text-white">Buka Cash Register</DialogTitle>
+              <DialogDescription className="text-slate-400">
+                Masukkan saldo awal kas di laci sebelum mulai bertransaksi di PoS.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-4 pt-2">
+              <div>
+                <label className="block text-sm font-medium text-slate-300 mb-1">
+                  Saldo Awal Kas (Rp)
+                </label>
+                <Input
+                  type="number"
+                  min={0}
+                  value={openingBalance}
+                  onChange={(e) => setOpeningBalance(Number(e.target.value) || 0)}
+                  className="bg-slate-800 border-slate-700 text-white"
+                  placeholder="Contoh: 500000"
+                />
+              </div>
+              <div className="flex justify-end gap-2 pt-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setOpenDialogOpen(false)}
+                  className="border-slate-700 text-slate-200 hover:text-white"
+                >
+                  Batal
+                </Button>
+                <Button
+                  type="button"
+                  onClick={handleOpen}
+                  disabled={saving}
+                  className="bg-green-600 hover:bg-green-700 text-white"
+                >
+                  {saving ? 'Membuka...' : 'Konfirmasi & Buka'}
+                </Button>
+              </div>
+            </div>
+          </DialogContent>
+        </Dialog>
 
         <Dialog open={closeDialogOpen} onOpenChange={setCloseDialogOpen}>
           <DialogContent className="sm:max-w-[420px] bg-slate-900 border border-slate-700">
