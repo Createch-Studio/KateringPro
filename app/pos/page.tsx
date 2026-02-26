@@ -1,7 +1,7 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
-import { MainLayout } from '@/components/layout/MainLayout';
+import { useEffect, useMemo, useState, useRef } from 'react';
+import { PosLayout } from '@/components/layout/PosLayout'; // Use new POS Layout
 import { useAuth } from '@/lib/auth-context';
 import { CashRegisterSession, Customer, Invoice, MenuItem, Order, Payment } from '@/lib/types';
 import { Input } from '@/components/ui/input';
@@ -12,10 +12,11 @@ import {
   DialogDescription,
   DialogHeader,
   DialogTitle,
+  DialogFooter,
 } from '@/components/ui/dialog';
 import { formatCurrency, getPocketBaseErrorMessage } from '@/lib/api';
 import { toast } from 'sonner';
-import { Search, Minus, Plus, Trash2 } from 'lucide-react';
+import { Search, Minus, Plus, Trash2, CheckCircle2, Wallet, LogOut } from 'lucide-react';
 
 interface CartItem {
   id: string;
@@ -41,7 +42,37 @@ export default function PosPage() {
   const [pendingInvoiceId, setPendingInvoiceId] = useState<string | null>(null);
   const [paymentMethod, setPaymentMethod] = useState<PosPaymentMethod>('cash');
   const [selectedCustomerId, setSelectedCustomerId] = useState('');
+  
+  const [successDialogOpen, setSuccessDialogOpen] = useState(false);
+  const [lastOrderDetails, setLastOrderDetails] = useState<any>(null);
+
+  // Recent Orders State
   const [recentOrders, setRecentOrders] = useState<Order[]>([]);
+  const [orderDialogOpen, setOrderDialogOpen] = useState(false);
+  const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
+
+  // Cash Register State
+  const [registerDialogOpen, setRegisterDialogOpen] = useState(false);
+  const [closeRegisterDialogOpen, setCloseRegisterDialogOpen] = useState(false);
+  const [openingBalance, setOpeningBalance] = useState('');
+  const [registerNote, setRegisterNote] = useState('');
+  const [closingNote, setClosingNote] = useState('');
+  const [cashCounted, setCashCounted] = useState('');
+
+  // Refs for accessing latest state in subscriptions
+  const cartItemsRef = useRef(cartItems);
+  const totalRef = useRef(0);
+  const midtransTransactionRef = useRef(midtransTransaction);
+  const customersRef = useRef(customers);
+  const selectedCustomerIdRef = useRef(selectedCustomerId);
+
+  useEffect(() => {
+    cartItemsRef.current = cartItems;
+    totalRef.current = cartItems.reduce((sum, item) => sum + item.menu.price * item.quantity, 0);
+    midtransTransactionRef.current = midtransTransaction;
+    customersRef.current = customers;
+    selectedCustomerIdRef.current = selectedCustomerId;
+  }, [cartItems, midtransTransaction, customers, selectedCustomerId]);
 
   const cashierName = employee?.name || user?.email || 'Kasir';
 
@@ -87,16 +118,6 @@ export default function PosPage() {
       }
 
       try {
-        const ordersRes = await pb.collection('orders').getList<Order>(1, 10, {
-          sort: '-created',
-          expand: 'customer_id',
-        });
-        setRecentOrders(ordersRes.items);
-      } catch (error: any) {
-        console.error('Failed to fetch recent orders', error);
-      }
-
-      try {
         setSessionLoading(true);
         if (user) {
           const sessionRes = await pb
@@ -120,6 +141,50 @@ export default function PosPage() {
 
     fetchData();
   }, [pb, isAuthenticated, user]);
+
+  // Fetch recent orders - SYNCED WITH app/orders/page.tsx
+  useEffect(() => {
+    if (!isAuthenticated || !pb) {
+      console.log('[v0] PoS: Not authenticated or pb not ready');
+      return;
+    }
+
+    const fetchRecentOrders = async () => {
+      try {
+        console.log('[v0] PoS: Fetching recent orders...');
+        
+        // Menggunakan opsi yang sama persis dengan app/orders/page.tsx
+        const options: any = {
+          sort: '-order_date',
+          // Tidak perlu filter tanggal di PoS, ambil 5 terbaru saja
+        };
+
+        const result = await pb.collection('orders').getList<Order>(1, 5, options);
+        console.log('[v0] PoS: Recent orders fetched:', result.items.length);
+        setRecentOrders(result.items);
+      } catch (error: any) {
+        console.error('[v0] PoS: Failed to fetch recent orders:', error);
+        toast.error(`Gagal memuat pesanan: ${error.message}`);
+      }
+    };
+
+    fetchRecentOrders();
+
+    // Subscribe to new orders
+    try {
+        pb.collection('orders').subscribe('*', (e) => {
+           if (e.action === 'create' || e.action === 'update') {
+              fetchRecentOrders();
+           }
+        });
+    } catch (err) {
+        console.error("Failed to subscribe to orders", err);
+    }
+
+    return () => {
+        pb.collection('orders').unsubscribe('*');
+    };
+  }, [isAuthenticated, pb]); // Dependensi dikembalikan seperti app/orders/page.tsx
 
   const filteredMenus = useMemo(() => {
     if (!search.trim()) return menus;
@@ -308,6 +373,7 @@ const qrCodeUrl = qrCodeV2?.url || transaction.actions?.find((a: any) => a.name 
         total_amount: total,
         status: 'sent',
         notes: `Invoice PoS (QRIS) ${orderNumber}`,
+        midtrans_order_id: midtransOrderId,
       };
 
       const newInvoice = (await pb
@@ -420,42 +486,133 @@ const qrCodeUrl = qrCodeV2?.url || transaction.actions?.find((a: any) => a.name 
     }
   };
 
-  useEffect(() => {
-  if (!pb || !pendingInvoiceId) return;
+  const handleOpenRegister = async () => {
+    if (!pb || !user) return;
+    if (!openingBalance) {
+      toast.error('Masukkan saldo awal');
+      return;
+    }
 
-  console.log(`[v0] Subscribing to invoice: ${pendingInvoiceId}`);
+    try {
+      setSaving(true);
+      const session = await pb.collection('cash_register_sessions').create({
+        user_id: user.id,
+        open_time: new Date().toISOString(),
+        opening_balance: parseFloat(openingBalance),
+        current_balance: parseFloat(openingBalance),
+        status: 'open',
+        notes: registerNote,
+      });
 
-  const handleInvoiceUpdate = (e: any) => {
-    console.log('[v0] Real-time event received:', e);
-    if (e.record.id === pendingInvoiceId && e.record.status === 'paid') {
-      console.log(`[v0] Payment for invoice ${pendingInvoiceId} confirmed via real-time update.`);
-      toast.success('Pembayaran QRIS berhasil diterima!');
-      
-      setQrisDialogOpen(false);
-      setMidtransTransaction(null);
-      setPendingInvoiceId(null);
-      setCartItems([]);
-      setSelectedCustomerId('');
-      setPaymentMethod('cash');
+      setRegisterSession(session as CashRegisterSession);
+      setRegisterDialogOpen(false);
+      toast.success('Cash Register berhasil dibuka');
+    } catch (error: any) {
+      const message = getPocketBaseErrorMessage(error, 'Gagal membuka cash register');
+      toast.error(message);
+    } finally {
+      setSaving(false);
     }
   };
 
-  pb.collection('invoices').subscribe(pendingInvoiceId, handleInvoiceUpdate);
+  const handleCloseRegister = async () => {
+    if (!pb || !registerSession) return;
+    
+    // Validasi input
+    if (cashCounted === '') {
+        toast.error('Masukkan jumlah uang tunai yang dihitung');
+        return;
+    }
 
-  return () => {
-    console.log(`[v0] Unsubscribing from invoice: ${pendingInvoiceId}`);
-    pb.collection('invoices').unsubscribe(pendingInvoiceId);
+    try {
+      setSaving(true);
+      const counted = parseFloat(cashCounted);
+      const expected = registerSession.current_balance || 0;
+      const difference = counted - expected;
+
+      await pb.collection('cash_register_sessions').update(registerSession.id, {
+        close_time: new Date().toISOString(),
+        status: 'closed',
+        final_balance: counted,
+        notes: `${registerSession.notes || ''} \n[Closing] Counted: ${counted}, Diff: ${difference}. Note: ${closingNote}`,
+      });
+      
+      setRegisterSession(null);
+      setCloseRegisterDialogOpen(false);
+      setCashCounted('');
+      setClosingNote('');
+      toast.success('Cash Register berhasil ditutup');
+    } catch (error: any) {
+       const message = getPocketBaseErrorMessage(error, 'Gagal menutup cash register');
+       toast.error(message);
+    } finally {
+      setSaving(false);
+    }
   };
-}, [pb, pendingInvoiceId, setCartItems, setSelectedCustomerId]);
+
+  const checkPaymentStatus = async () => {
+    if (!pb || !pendingInvoiceId) return;
+    
+    try {
+      setSaving(true);
+      const invoice = await pb.collection('invoices').getOne(pendingInvoiceId);
+      
+      if (invoice.status === 'paid') {
+        toast.success('Pembayaran terkonfirmasi!');
+        
+        // Trigger logika sukses yang sama dengan realtime
+        const currentCartItems = cartItemsRef.current;
+        const currentTotal = totalRef.current;
+        const currentTransaction = midtransTransactionRef.current;
+        const currentCustomer = customersRef.current.find(c => c.id === selectedCustomerIdRef.current);
+        
+        setLastOrderDetails({
+          orderId: currentTransaction?.midtrans_order_id || pendingInvoiceId || 'UNKNOWN',
+          date: new Date().toLocaleString('id-ID'),
+          customerName: currentCustomer?.name || 'Guest',
+          items: [...currentCartItems], 
+          total: currentTotal,
+          paymentMethod: 'QRIS'
+        });
+        
+        setSuccessDialogOpen(true);
+        setQrisDialogOpen(false);
+        setMidtransTransaction(null);
+        setPendingInvoiceId(null);
+        setCartItems([]);
+        setSelectedCustomerId('');
+        setPaymentMethod('cash');
+      } else {
+        toast.info('Pembayaran belum diterima/diproses. Silakan coba lagi sesaat lagi.');
+      }
+    } catch (error) {
+      console.error('Error checking status:', error);
+      toast.error('Gagal mengecek status pembayaran');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleViewOrder = async (order: Order) => {
+    try {
+      // Fetch full order details with items
+      const fullOrder = await pb!.collection('orders').getOne(order.id, {
+        expand: 'customer_id,order_items_via_order_id.menu_id',
+      });
+      setSelectedOrder(fullOrder);
+      setOrderDialogOpen(true);
+    } catch (error) {
+      toast.error('Gagal memuat detail pesanan');
+    }
+  };
 
   return (
-    <MainLayout title="PoS (Point of Sale)">
-      <div className="space-y-6">
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          <div className="lg:col-span-2 space-y-4">
-            <div className="flex items-center gap-3">
-              <div className="flex-1 max-w-md">
-                <div className="relative">
+    <PosLayout title="PoS (Point of Sale)">
+      <div className="h-full flex flex-col lg:flex-row gap-6">
+        {/* Left Side: Menu Grid */}
+        <div className="flex-1 flex flex-col min-h-0">
+            <div className="flex items-center justify-between mb-4">
+               <div className="relative flex-1 max-w-md">
                   <Search
                     size={18}
                     className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500"
@@ -467,181 +624,407 @@ const qrCodeUrl = qrCodeV2?.url || transaction.actions?.find((a: any) => a.name 
                     className="pl-10 bg-slate-800 border-slate-700 text-white placeholder-slate-500"
                   />
                 </div>
-              </div>
+                
+                {/* Cash Register Status */}
+                <div className="ml-4">
+                    {sessionLoading ? (
+                        <div className="h-10 w-32 bg-slate-800 animate-pulse rounded-lg"></div>
+                    ) : registerSession ? (
+                        <div className="flex items-center gap-2 px-4 py-2 bg-green-500/10 border border-green-500/20 rounded-lg">
+                            <Wallet size={16} className="text-green-500" />
+                            <div className="text-xs">
+                                <p className="text-green-500 font-semibold">Register Open</p>
+                                <p className="text-slate-400">Bal: {formatCurrency(registerSession.current_balance || 0)}</p>
+                            </div>
+                            <Button 
+                                size="sm" 
+                                variant="ghost" 
+                                onClick={() => setCloseRegisterDialogOpen(true)}
+                                className="h-6 w-6 p-0 ml-1 text-slate-400 hover:text-red-400"
+                                title="Tutup Register"
+                            >
+                                <LogOut size={14} />
+                            </Button>
+                        </div>
+                    ) : (
+                        <Button 
+                            onClick={() => setRegisterDialogOpen(true)}
+                            className="bg-slate-800 hover:bg-slate-700 text-white border border-slate-600 gap-2"
+                        >
+                            <Wallet size={16} />
+                            Buka Register
+                        </Button>
+                    )}
+                </div>
             </div>
 
-            <div className="bg-slate-900 border border-slate-700 rounded-lg p-4">
+            <div className="flex-1 overflow-y-auto bg-slate-900/50 border border-slate-700 rounded-lg p-4">
               {menusLoading ? (
-                <div className="text-sm text-slate-400">Memuat daftar menu...</div>
+                <div className="flex items-center justify-center h-full text-slate-400">
+                    <div className="flex flex-col items-center gap-2">
+                        <div className="w-8 h-8 border-2 border-slate-600 border-t-orange-500 rounded-full animate-spin"></div>
+                        <span>Memuat menu...</span>
+                    </div>
+                </div>
               ) : filteredMenus.length === 0 ? (
-                <div className="text-sm text-slate-400">
+                <div className="flex items-center justify-center h-full text-slate-500">
                   {menus.length === 0
                     ? 'Belum ada menu yang dapat dijual'
                     : 'Tidak ada menu yang cocok dengan pencarian'}
                 </div>
               ) : (
-                <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-3">
+                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
                   {filteredMenus.map((menu) => (
                     <button
                       key={menu.id}
                       type="button"
                       onClick={() => addToCart(menu)}
-                      className="bg-slate-800 border border-slate-700 rounded-lg p-3 text-left hover:border-orange-500 hover:bg-slate-800/80 transition-colors"
+                      className="group bg-slate-800 border border-slate-700 rounded-xl p-3 text-left hover:border-orange-500 hover:bg-slate-800/80 hover:shadow-lg hover:shadow-orange-500/10 transition-all flex flex-col h-full"
                     >
-                      <div className="text-sm font-semibold text-white mb-1 truncate">
-                        {menu.name}
+                      {/* Placeholder Image if needed */}
+                      <div className="aspect-video bg-slate-700 rounded-lg mb-3 w-full overflow-hidden relative">
+                         {menu.photo ? (
+                             <img src={`/api/files/${menu.collectionId}/${menu.id}/${menu.photo}`} alt={menu.name} className="w-full h-full object-cover group-hover:scale-105 transition-transform" />
+                         ) : (
+                             <div className="w-full h-full flex items-center justify-center text-slate-500 text-xs">No Image</div>
+                         )}
                       </div>
-                      <div className="text-xs text-slate-400 mb-1 line-clamp-2">
-                        {menu.description || '-'}
+                      
+                      <div className="flex-1">
+                        <div className="text-sm font-semibold text-white mb-1 line-clamp-2 leading-tight">
+                            {menu.name}
+                        </div>
+                        <div className="text-xs text-slate-400 mb-2 line-clamp-2 h-8">
+                            {menu.description || '-'}
+                        </div>
                       </div>
-                      <div className="text-sm font-bold text-orange-400 mt-1">
-                        {formatCurrency(menu.price)}
+                      
+                      <div className="mt-auto pt-2 border-t border-slate-700/50 flex justify-between items-center">
+                        <div className="text-sm font-bold text-orange-400">
+                            {formatCurrency(menu.price)}
+                        </div>
+                        <div className="w-6 h-6 rounded-full bg-orange-500/10 text-orange-500 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                            <Plus size={14} />
+                        </div>
                       </div>
                     </button>
                   ))}
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
-
-          <div className="space-y-4">
-            <div className="bg-slate-900 border border-slate-700 rounded-lg p-4">
-              <div className="flex items-center justify-between mb-3">
-                <h2 className="text-sm font-semibold text-white">Keranjang</h2>
-                {sessionLoading ? (
-                  <span className="text-xs text-slate-400">Memeriksa cash register...</span>
-                ) : registerSession ? (
-                  <span className="text-xs text-green-400">Cash register terbuka</span>
-                ) : (
-                  <span className="text-xs text-red-400">
-                    Cash register belum dibuka (buka di menu Cash Register)
-                  </span>
-                )}
-              </div>
-
-              <div className="flex-1 overflow-y-auto p-4 space-y-3 max-h-[320px] custom-scrollbar">
-                {cartItems.length === 0 ? (
-                  <div className="h-full flex flex-col items-center justify-center text-slate-500 space-y-3 opacity-60 min-h-[200px]">
-                    <div className="w-16 h-16 bg-slate-800 rounded-full flex items-center justify-center">
-                      <Minus size={24} className="text-slate-600" />
-                    </div>
-                    <p>Keranjang kosong</p>
-                  </div>
-                ) : (
-                  <div className="space-y-3">
-                  {cartItems.map((item) => (
-                    <div
-                      key={item.id}
-                      className="flex items-center justify-between border-b border-slate-800 pb-2 last:border-0"
-                    >
-                      <div className="flex-1 mr-2">
-                        <p className="text-sm font-medium text-white truncate">
-                          {item.menu.name}
-                        </p>
-                        <p className="text-xs text-slate-400">
-                          {item.quantity} x {formatCurrency(item.menu.price)}
-                        </p>
-                        <p className="text-sm font-semibold text-orange-400">
-                          {formatCurrency(item.menu.price * item.quantity)}
-                        </p>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <button
-                          type="button"
-                          onClick={() => updateQuantity(item.id, -1)}
-                          className="p-1 rounded bg-slate-800 text-slate-200 hover:bg-slate-700"
-                        >
-                          <Minus size={14} />
-                        </button>
-                        <span className="w-6 text-center text-sm text-white">
-                          {item.quantity}
-                        </span>
-                        <button
-                          type="button"
-                          onClick={() => updateQuantity(item.id, 1)}
-                          className="p-1 rounded bg-slate-800 text-slate-200 hover:bg-slate-700"
-                        >
-                          <Plus size={14} />
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => removeFromCart(item.id)}
-                          className="p-1 rounded bg-red-500/10 text-red-400 hover:bg-red-500/20"
-                        >
-                          <Trash2 size={14} />
-                        </button>
-                      </div>
-                    </div>
-                  ))}
                 </div>
               )}
-
-              <div className="border-t border-slate-700 mt-3 pt-3 space-y-1">
-                <div className="flex items-center justify-between text-sm">
-                  <span className="text-slate-400">Subtotal</span>
-                  <span className="text-slate-100">{formatCurrency(subtotal)}</span>
-                </div>
-                <div className="flex items-center justify-between text-sm font-semibold">
-                  <span className="text-slate-200">Total</span>
-                  <span className="text-orange-400 text-lg">{formatCurrency(total)}</span>
-                </div>
-              </div>
-
-              <Button
-                type="button"
-                onClick={handleCheckout}
-                disabled={!canCheckout}
-                className="mt-4 w-full bg-orange-500 hover:bg-orange-600 text-white disabled:opacity-60 disabled:cursor-not-allowed"
-              >
-                {registerSession ? 'Simpan & Bayar' : 'Cash register belum dibuka'}
-              </Button>
             </div>
+        </div>
 
-            {/* Recent Orders Compact View - Fixed Height 5 items (approx 280px) */}
-            <div className="bg-slate-900 border border-slate-700 rounded-lg p-4">
+        {/* Right Side: Cart & Recent Orders Panel */}
+        <div className="w-full lg:w-96 flex flex-col h-full max-h-[calc(100vh-140px)] sticky top-4 gap-4">
+            
+            {/* Cart Section */}
+            <div className="flex flex-col bg-slate-900 border border-slate-700 rounded-lg flex-1 min-h-0 overflow-hidden">
+                <div className="p-4 border-b border-slate-800 shrink-0">
+                    <h2 className="text-lg font-bold text-white flex items-center gap-2">
+                        <div className="w-2 h-6 bg-orange-500 rounded-full"></div>
+                        Keranjang
+                    </h2>
+                </div>
+
+                <div className="flex-1 overflow-y-auto p-4 space-y-3">
+                  {cartItems.length === 0 ? (
+                    <div className="h-full flex flex-col items-center justify-center text-slate-500 space-y-3 opacity-60 min-h-[200px]">
+                        <div className="w-16 h-16 bg-slate-800 rounded-full flex items-center justify-center">
+                            <Minus size={24} className="text-slate-600" />
+                        </div>
+                        <p>Keranjang kosong</p>
+                    </div>
+                  ) : (
+                    cartItems.map((item) => (
+                        <div
+                          key={item.id}
+                          className="flex gap-3 bg-slate-800/50 p-3 rounded-lg border border-slate-800 hover:border-slate-700 transition-colors"
+                        >
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-medium text-white truncate mb-1">
+                              {item.menu.name}
+                            </p>
+                            <p className="text-xs text-orange-400 font-semibold">
+                              {formatCurrency(item.menu.price * item.quantity)}
+                            </p>
+                          </div>
+                          
+                          <div className="flex flex-col items-end gap-2">
+                              <div className="flex items-center bg-slate-900 rounded-lg border border-slate-700 p-0.5">
+                                <button
+                                  type="button"
+                                  onClick={() => updateQuantity(item.id, -1)}
+                                  className="w-7 h-7 flex items-center justify-center rounded text-slate-400 hover:bg-slate-800 hover:text-white transition-colors"
+                                >
+                                  <Minus size={14} />
+                                </button>
+                                <span className="w-8 text-center text-sm font-medium text-white">
+                                  {item.quantity}
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={() => updateQuantity(item.id, 1)}
+                                  className="w-7 h-7 flex items-center justify-center rounded text-slate-400 hover:bg-slate-800 hover:text-white transition-colors"
+                                >
+                                  <Plus size={14} />
+                                </button>
+                              </div>
+                              
+                              <button
+                                  onClick={() => removeFromCart(item.id)}
+                                  className="text-xs text-red-400 hover:text-red-300 flex items-center gap-1 opacity-60 hover:opacity-100 transition-opacity"
+                              >
+                                  <Trash2 size={12} /> Hapus
+                              </button>
+                          </div>
+                        </div>
+                      ))
+                  )}
+                </div>
+
+                <div className="p-4 bg-slate-900 border-t border-slate-800 space-y-4 shrink-0">
+                    <div className="space-y-2 text-sm">
+                        <div className="flex justify-between text-slate-400">
+                            <span>Subtotal</span>
+                            <span>{formatCurrency(subtotal)}</span>
+                        </div>
+                        <div className="flex justify-between text-slate-400">
+                            <span>Pajak (0%)</span>
+                            <span>{formatCurrency(0)}</span>
+                        </div>
+                        <div className="flex justify-between text-lg font-bold text-white pt-2 border-t border-slate-800">
+                            <span>Total</span>
+                            <span className="text-orange-400">{formatCurrency(total)}</span>
+                        </div>
+                    </div>
+
+                    <Button
+                        type="button"
+                        onClick={handleCheckout}
+                        disabled={!canCheckout}
+                        className="w-full h-12 text-lg font-bold bg-orange-500 hover:bg-orange-600 text-white shadow-lg shadow-orange-500/20 disabled:shadow-none disabled:opacity-50"
+                    >
+                        {registerSession ? 'Bayar Sekarang' : 'Buka Register Dulu'}
+                    </Button>
+                </div>
+            </div>
+            
+            {/* Recent Orders Compact View - Separate Container, Auto Height */}
+            <div className="bg-slate-900 border border-slate-700 rounded-lg p-4 shrink-0">
               <h3 className="text-sm font-semibold text-white mb-3 flex items-center gap-2">
                 <div className="w-2 h-4 bg-blue-500 rounded-full"></div>
                 Pesanan Terakhir
               </h3>
-              <div className="space-y-2 max-h-[280px] overflow-y-auto custom-scrollbar">
+              <div className="space-y-2">
                 {recentOrders.map((order) => (
-                  <div key={order.id} className="p-3 rounded bg-slate-800 border border-slate-700">
-                    <div className="flex justify-between items-start mb-1">
-                      <div>
-                        <p className="text-xs font-bold text-white">{order.order_number}</p>
-                        <p className="text-[10px] text-slate-400">
-                          {new Date(order.created).toLocaleString()}
-                        </p>
+                  <div key={order.id} className="bg-slate-800/30 border border-slate-800 rounded-lg p-2 text-xs hover:bg-slate-800/50 transition-colors flex justify-between items-center group">
+                    <div>
+                      <div className="flex items-center gap-2 mb-1">
+                        <span className="font-mono text-slate-400">#{order.order_number.slice(-4)}</span>
+                        <span className={`px-1.5 py-0.5 rounded text-[10px] uppercase font-bold ${
+                          order.status === 'completed' ? 'bg-green-500/20 text-green-400' :
+                          order.status === 'confirmed' ? 'bg-blue-500/20 text-blue-400' :
+                          order.status === 'cancelled' ? 'bg-red-500/20 text-red-400' :
+                          'bg-slate-700 text-slate-300'
+                        }`}>
+                          {order.status}
+                        </span>
                       </div>
-                      <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${
-                        order.status === 'completed' ? 'bg-green-500/20 text-green-400' :
-                        order.status === 'confirmed' ? 'bg-blue-500/20 text-blue-400' :
-                        'bg-slate-700 text-slate-300'
-                      }`}>
-                        {order.status}
-                      </span>
-                    </div>
-                    <div className="flex justify-between items-end">
-                      <p className="text-xs text-slate-300 truncate max-w-[120px]">
-                        {order.expand?.customer_id?.name || 'Customer'}
-                      </p>
-                      <p className="text-xs font-semibold text-orange-400">
+                      <div className="text-slate-300 font-medium">
                         {formatCurrency(order.total)}
-                      </p>
+                      </div>
                     </div>
+                    <Button 
+                      size="sm" 
+                      variant="ghost" 
+                      onClick={() => handleViewOrder(order)}
+                      className="h-7 px-2 text-[10px] text-blue-400 hover:text-blue-300 hover:bg-blue-500/10 opacity-0 group-hover:opacity-100 transition-opacity"
+                    >
+                      Lihat
+                    </Button>
                   </div>
                 ))}
                 {recentOrders.length === 0 && (
-                  <div className="text-center py-4 text-xs text-slate-500">
-                    Belum ada pesanan terbaru
-                  </div>
+                  <p className="text-slate-500 text-xs text-center py-2">Belum ada pesanan.</p>
                 )}
               </div>
             </div>
-          </div>
         </div>
+      </div>
 
+      {/* View Order Dialog */}
+      <Dialog open={orderDialogOpen} onOpenChange={setOrderDialogOpen}>
+        <DialogContent className="sm:max-w-[500px] bg-slate-900 border border-slate-700">
+          <DialogHeader>
+            <DialogTitle className="text-white">Detail Pesanan</DialogTitle>
+          </DialogHeader>
+          
+          {selectedOrder && (
+            <div className="space-y-4">
+               <div className="flex justify-between items-start bg-slate-800 p-3 rounded-lg">
+                  <div>
+                    <p className="text-slate-400 text-xs">No. Order</p>
+                    <p className="text-white font-mono font-bold">{selectedOrder.order_number}</p>
+                  </div>
+                  <div className="text-right">
+                    <p className="text-slate-400 text-xs">Status</p>
+                    <span className={`inline-block px-2 py-0.5 rounded text-xs font-bold ${
+                          selectedOrder.status === 'completed' ? 'bg-green-500/20 text-green-400' :
+                          selectedOrder.status === 'confirmed' ? 'bg-blue-500/20 text-blue-400' :
+                          selectedOrder.status === 'cancelled' ? 'bg-red-500/20 text-red-400' :
+                          'bg-slate-700 text-slate-300'
+                        }`}>
+                        {selectedOrder.status}
+                    </span>
+                  </div>
+               </div>
+
+               <div className="grid grid-cols-2 gap-4 text-sm">
+                  <div>
+                    <p className="text-slate-400 text-xs">Tanggal</p>
+                    <p className="text-slate-200">
+                        {selectedOrder.order_date ? new Date(selectedOrder.order_date).toLocaleDateString('id-ID', {
+                            day: 'numeric', month: 'short', year: 'numeric'
+                        }) : '-'}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-slate-400 text-xs">Pelanggan</p>
+                    <p className="text-slate-200">{(selectedOrder.expand?.customer_id as Customer)?.name || 'Guest'}</p>
+                  </div>
+               </div>
+
+               <div className="border-t border-slate-800 pt-3">
+                  <p className="text-xs font-medium text-slate-400 mb-2 uppercase tracking-wider">Item Pesanan</p>
+                  <div className="space-y-2">
+                    {selectedOrder.expand?.order_items_via_order_id?.map((item: any) => (
+                      <div key={item.id} className="flex justify-between text-sm">
+                        <span className="text-slate-300">
+                           {item.quantity}x {(item.expand?.menu_id as MenuItem)?.name || 'Unknown Item'}
+                        </span>
+                        <span className="text-slate-200 font-medium">
+                           {formatCurrency(item.total)}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+               </div>
+
+               <div className="border-t border-slate-800 pt-3 flex justify-between items-center">
+                  <span className="font-bold text-slate-200">Total</span>
+                  <span className="font-bold text-xl text-orange-400">{formatCurrency(selectedOrder.total)}</span>
+               </div>
+               
+               <div className="flex justify-end pt-2">
+                  <Button variant="outline" onClick={() => setOrderDialogOpen(false)} className="border-slate-700 text-slate-300">
+                    Tutup
+                  </Button>
+               </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Register Dialog */}
+      <Dialog open={registerDialogOpen} onOpenChange={setRegisterDialogOpen}>
+        <DialogContent className="sm:max-w-[400px] bg-slate-900 border border-slate-700">
+            <DialogHeader>
+                <DialogTitle className="text-white">Buka Cash Register</DialogTitle>
+                <DialogDescription className="text-slate-400">
+                    Masukkan saldo awal (modal kasir) untuk memulai sesi penjualan.
+                </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-4 py-4">
+                <div className="space-y-2">
+                    <label className="text-sm font-medium text-slate-300">Saldo Awal (Rp)</label>
+                    <Input 
+                        type="number" 
+                        placeholder="0"
+                        value={openingBalance}
+                        onChange={(e) => setOpeningBalance(e.target.value)}
+                        className="bg-slate-800 border-slate-700 text-white"
+                        autoFocus
+                    />
+                </div>
+                <div className="space-y-2">
+                    <label className="text-sm font-medium text-slate-300">Catatan (Opsional)</label>
+                    <Input 
+                        placeholder="Shift pagi, modal tambahan, dll"
+                        value={registerNote}
+                        onChange={(e) => setRegisterNote(e.target.value)}
+                        className="bg-slate-800 border-slate-700 text-white"
+                    />
+                </div>
+            </div>
+            <DialogFooter>
+                <Button variant="ghost" onClick={() => setRegisterDialogOpen(false)} className="text-slate-400">Batal</Button>
+                <Button onClick={handleOpenRegister} disabled={saving || !openingBalance} className="bg-orange-500 hover:bg-orange-600 text-white">
+                    {saving ? 'Memproses...' : 'Buka Register'}
+                </Button>
+            </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      
+      {/* Close Register Dialog */}
+      <Dialog open={closeRegisterDialogOpen} onOpenChange={setCloseRegisterDialogOpen}>
+        <DialogContent className="sm:max-w-[400px] bg-slate-900 border border-slate-700">
+            <DialogHeader>
+                <DialogTitle className="text-white">Tutup Cash Register</DialogTitle>
+                <DialogDescription className="text-slate-400">
+                    Masukkan jumlah uang fisik di laci (cash count).
+                </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-4 py-4">
+                <div className="bg-slate-800 p-3 rounded-lg flex justify-between items-center text-sm">
+                    <span className="text-slate-400">Saldo Sistem:</span>
+                    <span className="text-white font-bold">{formatCurrency(registerSession?.current_balance || 0)}</span>
+                </div>
+                
+                <div className="space-y-2">
+                    <label className="text-sm font-medium text-slate-300">Total Uang Fisik (Rp)</label>
+                    <Input 
+                        type="number" 
+                        placeholder="0"
+                        value={cashCounted}
+                        onChange={(e) => setCashCounted(e.target.value)}
+                        className="bg-slate-800 border-slate-700 text-white"
+                        autoFocus
+                    />
+                </div>
+                
+                <div className="space-y-2">
+                    <label className="text-sm font-medium text-slate-300">Catatan Penutupan</label>
+                    <Input 
+                        placeholder="Selisih karena kembalian, dll"
+                        value={closingNote}
+                        onChange={(e) => setClosingNote(e.target.value)}
+                        className="bg-slate-800 border-slate-700 text-white"
+                    />
+                </div>
+
+                {cashCounted && (
+                   <div className={`p-3 rounded-lg text-sm flex justify-between items-center ${
+                      parseFloat(cashCounted) - (registerSession?.current_balance || 0) === 0 
+                      ? 'bg-green-500/10 text-green-400' 
+                      : 'bg-red-500/10 text-red-400'
+                   }`}>
+                      <span>Selisih:</span>
+                      <span className="font-bold">
+                        {formatCurrency(parseFloat(cashCounted) - (registerSession?.current_balance || 0))}
+                      </span>
+                   </div>
+                )}
+            </div>
+            <DialogFooter>
+                <Button variant="ghost" onClick={() => setCloseRegisterDialogOpen(false)} className="text-slate-400">Batal</Button>
+                <Button onClick={handleCloseRegister} disabled={saving || !cashCounted} className="bg-red-500 hover:bg-red-600 text-white">
+                    {saving ? 'Memproses...' : 'Tutup Register'}
+                </Button>
+            </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      
+      {/* Existing Checkout & Success Dialogs (Hidden from visual structure but kept in DOM) */}
         <Dialog open={checkoutDialogOpen} onOpenChange={setCheckoutDialogOpen}>
           <DialogContent className="sm:max-w-[420px] bg-slate-900 border border-slate-700">
             <DialogHeader>
@@ -721,8 +1104,16 @@ const qrCodeUrl = qrCodeV2?.url || transaction.actions?.find((a: any) => a.name 
           </DialogContent>
         </Dialog>
 
-<Dialog open={qrisDialogOpen} onOpenChange={setQrisDialogOpen}>
-  <DialogContent className="sm:max-w-[420px] bg-slate-900 border border-slate-700">
+<Dialog open={qrisDialogOpen} onOpenChange={(open) => {
+  // Cegah penutupan dialog saat klik di luar (backdrop)
+  if (!open) return; 
+  setQrisDialogOpen(open);
+}}>
+  <DialogContent 
+    className="sm:max-w-[420px] bg-slate-900 border border-slate-700" 
+    onInteractOutside={(e) => e.preventDefault()} 
+    onEscapeKeyDown={(e) => e.preventDefault()}
+  >
     <DialogHeader>
       <DialogTitle className="text-white">Pembayaran QRIS</DialogTitle>
       <DialogDescription className="text-slate-400">
@@ -760,15 +1151,26 @@ const qrCodeUrl = qrCodeV2?.url || transaction.actions?.find((a: any) => a.name 
       <div className="flex justify-end gap-3 pt-2">
         <Button
           type="button"
+          variant="secondary"
+          onClick={checkPaymentStatus}
+          disabled={saving}
+          className="bg-blue-500/10 text-blue-400 hover:bg-blue-500/20 hover:text-blue-300 border border-blue-500/20"
+        >
+          Cek Status
+        </Button>
+        <Button
+          type="button"
           variant="outline"
           onClick={() => {
-            setQrisDialogOpen(false);
-            setMidtransTransaction(null);
-            // Hapus invoice pending jika dibatalkan
-            if (pb && pendingInvoiceId) {
-              pb.collection('invoices').delete(pendingInvoiceId).catch(delErr => console.error("Failed to delete pending invoice on cancel:", delErr));
+            if (confirm('Apakah Anda yakin ingin membatalkan transaksi ini?')) {
+                setQrisDialogOpen(false);
+                setMidtransTransaction(null);
+                // Hapus invoice pending jika dibatalkan
+                if (pb && pendingInvoiceId) {
+                  pb.collection('invoices').delete(pendingInvoiceId).catch(delErr => console.error("Failed to delete pending invoice on cancel:", delErr));
+                }
+                setPendingInvoiceId(null);
             }
-            setPendingInvoiceId(null);
           }}
           disabled={saving}
           className="border-slate-700 text-slate-300 hover:text-white"
@@ -779,7 +1181,71 @@ const qrCodeUrl = qrCodeV2?.url || transaction.actions?.find((a: any) => a.name 
     </div>
   </DialogContent>
 </Dialog>
+
+<Dialog open={successDialogOpen} onOpenChange={setSuccessDialogOpen}>
+  <DialogContent className="sm:max-w-[420px] bg-slate-900 border border-slate-700">
+    <DialogHeader>
+      <div className="mx-auto bg-green-500/10 p-3 rounded-full mb-2">
+        <CheckCircle2 className="h-8 w-8 text-green-500" />
       </div>
-    </MainLayout>
+      <DialogTitle className="text-center text-white text-xl">Pembayaran Berhasil!</DialogTitle>
+      <DialogDescription className="text-center text-slate-400">
+        Transaksi telah berhasil diproses.
+      </DialogDescription>
+    </DialogHeader>
+
+    {lastOrderDetails && (
+      <div className="space-y-4 mt-2">
+        <div className="bg-slate-800/50 rounded-lg p-4 space-y-3 text-sm">
+          <div className="flex justify-between">
+            <span className="text-slate-400">Order ID</span>
+            <span className="text-slate-200 font-mono">{lastOrderDetails.orderId}</span>
+          </div>
+          <div className="flex justify-between">
+            <span className="text-slate-400">Tanggal</span>
+            <span className="text-slate-200">{lastOrderDetails.date}</span>
+          </div>
+          <div className="flex justify-between">
+            <span className="text-slate-400">Pelanggan</span>
+            <span className="text-slate-200">{lastOrderDetails.customerName}</span>
+          </div>
+          <div className="flex justify-between">
+             <span className="text-slate-400">Metode</span>
+             <span className="text-slate-200 font-medium">{lastOrderDetails.paymentMethod}</span>
+          </div>
+        </div>
+
+        <div className="border-t border-slate-800 pt-3">
+            <p className="text-xs font-medium text-slate-400 mb-2 uppercase tracking-wider">Detail Item</p>
+            <div className="space-y-2 max-h-40 overflow-y-auto">
+                {lastOrderDetails.items.map((item: any, idx: number) => (
+                    <div key={idx} className="flex justify-between text-sm">
+                        <span className="text-slate-300">
+                            {item.quantity}x {item.menu.name}
+                        </span>
+                        <span className="text-slate-200">
+                            {formatCurrency(item.menu.price * item.quantity)}
+                        </span>
+                    </div>
+                ))}
+            </div>
+        </div>
+        
+        <div className="border-t border-slate-800 pt-3 flex justify-between items-center">
+            <span className="font-semibold text-slate-200">Total Bayar</span>
+            <span className="font-bold text-xl text-orange-400">{formatCurrency(lastOrderDetails.total)}</span>
+        </div>
+
+        <Button 
+            className="w-full bg-slate-800 hover:bg-slate-700 text-white mt-4"
+            onClick={() => setSuccessDialogOpen(false)}
+        >
+            Tutup
+        </Button>
+      </div>
+    )}
+  </DialogContent>
+</Dialog>
+    </PosLayout>
   );
 }
