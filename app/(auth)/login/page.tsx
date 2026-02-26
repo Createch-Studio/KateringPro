@@ -10,16 +10,20 @@ import { getPocketBaseErrorMessage } from '@/lib/api';
 
 export default function LoginPage() {
   const router = useRouter();
-  const { login, isAuthenticated } = useAuth();
+  const { login, isAuthenticated, employeeRole } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [isLoading, setIsLoading] = useState(false);
 
   useEffect(() => {
     if (isAuthenticated) {
-      router.push('/dashboard');
+      if (employeeRole === 'cashier') {
+        router.push('/');
+      } else {
+        router.push('/dashboard');
+      }
     }
-  }, [isAuthenticated, router]);
+  }, [isAuthenticated, employeeRole, router]);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -32,7 +36,7 @@ export default function LoginPage() {
       setIsLoading(true);
       await login(email, password);
       toast.success('Login successful');
-      router.push('/dashboard');
+      // Redirect handled by useEffect
     } catch (error: any) {
       console.error('[v0] Login error:', error);
       const message =
