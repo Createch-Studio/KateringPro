@@ -60,6 +60,9 @@ export default function PosPage() {
   const [registerNote, setRegisterNote] = useState('');
   const [closingNote, setClosingNote] = useState('');
   const [cashCounted, setCashCounted] = useState('');
+  const [paymentBreakdown, setPaymentBreakdown] = useState<{ method: string; label: string; total: number }[]>([]);
+  const [breakdownLoading, setBreakdownLoading] = useState(false);
+  const [expectedCashFromQuery, setExpectedCashFromQuery] = useState(0);
 
   // Refs for accessing latest state in subscriptions
   const cartItemsRef = useRef(cartItems);
@@ -459,6 +462,15 @@ export default function PosPage() {
         notes: `Kasir ${cashierName}`,
       });
 
+      // Update current_balance register untuk pembayaran cash/other (uang tunai masuk)
+      if (paymentMethod === 'cash' || paymentMethod === 'other') {
+        const newBalance = (registerSession.current_balance || 0) + total;
+        await pb.collection('cash_register_sessions').update(registerSession.id, {
+          current_balance: newBalance,
+        });
+        setRegisterSession({ ...registerSession, current_balance: newBalance });
+      }
+
       const customer = customers.find((c) => c.id === selectedCustomerId);
       setLastOrderDetails({
         orderId: orderNumber,
@@ -515,6 +527,44 @@ export default function PosPage() {
     }
   };
 
+  const handleOpenCloseRegisterDialog = async () => {
+    if (!pb || !registerSession) return;
+    try {
+      setBreakdownLoading(true);
+      const res = await pb.collection('payments').getList<Payment>(1, 500, {
+        filter: `session_id = "${registerSession.id}"`,
+      });
+      const methodLabels: Record<string, string> = {
+        cash: 'Cash',
+        qris: 'QRIS',
+        transfer_bank: 'Transfer Bank',
+        giro: 'Giro',
+        cheque: 'Cek',
+      };
+      const grouped: Record<string, number> = {};
+      for (const p of res.items) {
+        const m = p.method || 'other';
+        grouped[m] = (grouped[m] || 0) + (p.amount || 0);
+      }
+      const breakdown = Object.entries(grouped).map(([method, total]) => ({
+        method,
+        label: methodLabels[method] || method,
+        total,
+      }));
+      setPaymentBreakdown(breakdown);
+      const cashTotal = grouped['cash'] || 0;
+      const expected = (registerSession.opening_balance || 0) + cashTotal;
+      setExpectedCashFromQuery(expected);
+      setCashCounted(String(expected));
+    } catch (e) {
+      setPaymentBreakdown([]);
+      setExpectedCashFromQuery(registerSession.current_balance || 0);
+    } finally {
+      setBreakdownLoading(false);
+    }
+    setCloseRegisterDialogOpen(true);
+  };
+
   const handleCloseRegister = async () => {
     if (!pb || !registerSession) return;
 
@@ -526,20 +576,22 @@ export default function PosPage() {
     try {
       setSaving(true);
       const counted = parseFloat(cashCounted);
-      const expected = registerSession.current_balance || 0;
+      const expected = expectedCashFromQuery;
       const difference = counted - expected;
 
       await pb.collection('cash_register_sessions').update(registerSession.id, {
         close_time: new Date().toISOString(),
                                                            status: 'closed',
                                                            final_balance: counted,
-                                                           notes: `${registerSession.notes || ''} \n[Closing] Counted: ${counted}, Diff: ${difference}. Note: ${closingNote}`,
+                                                           notes: `${registerSession.notes || ''} \n[Closing] Counted: ${counted}, Expected: ${expected}, Diff: ${difference}. Note: ${closingNote}`,
       });
 
       setRegisterSession(null);
       setCloseRegisterDialogOpen(false);
       setCashCounted('');
       setClosingNote('');
+      setPaymentBreakdown([]);
+      setExpectedCashFromQuery(0);
       toast.success('Cash Register berhasil ditutup');
     } catch (error: any) {
       const message = getPocketBaseErrorMessage(error, 'Gagal menutup cash register');
@@ -876,7 +928,7 @@ export default function PosPage() {
       <Button
       size="sm"
       variant="ghost"
-      onClick={() => setCloseRegisterDialogOpen(true)}
+      onClick={handleOpenCloseRegisterDialog}
       className="h-6 w-6 p-0 ml-1 text-slate-400 hover:text-red-400"
       title="Tutup Register"
       >
@@ -1380,33 +1432,82 @@ export default function PosPage() {
 
       {/* Close Register Dialog */}
       <Dialog open={closeRegisterDialogOpen} onOpenChange={setCloseRegisterDialogOpen}>
-      <DialogContent className="sm:max-w-[400px] bg-slate-900 border border-slate-700">
+      <DialogContent className="sm:max-w-[420px] bg-slate-900 border border-slate-700">
       <DialogHeader>
       <DialogTitle className="text-white">Tutup Cash Register</DialogTitle>
       <DialogDescription className="text-slate-400">
-      Masukkan jumlah uang fisik di laci (cash count).
+      Periksa pendapatan dan masukkan jumlah uang fisik di laci.
       </DialogDescription>
       </DialogHeader>
-      <div className="space-y-4 py-4">
-      <div className="bg-slate-800 p-3 rounded-lg flex justify-between items-center text-sm">
-      <span className="text-slate-400">Saldo Sistem:</span>
-      <span className="text-white font-bold">
-      {formatCurrency(registerSession?.current_balance || 0)}
-      </span>
+      <div className="space-y-4 py-2">
+
+      {/* Opening Balance + Expected Cash */}
+      <div className="grid grid-cols-2 gap-3 text-sm">
+      <div className="bg-slate-800/60 border border-slate-700 rounded p-3">
+      <p className="text-xs text-slate-400 mb-1">Opening Balance</p>
+      <p className="text-base font-semibold text-slate-100">
+      {formatCurrency(registerSession?.opening_balance || 0)}
+      </p>
+      </div>
+      <div className="bg-slate-800/60 border border-slate-700 rounded p-3">
+      <p className="text-xs text-slate-400 mb-1">Expected Cash</p>
+      <p className="text-base font-semibold text-orange-400">
+      {breakdownLoading ? 'Menghitung...' : formatCurrency(expectedCashFromQuery)}
+      </p>
+      </div>
       </div>
 
+      {/* Payment Breakdown */}
+      {!breakdownLoading && paymentBreakdown.length > 0 && (
+        <div className="bg-slate-800/40 border border-slate-700 rounded-lg p-3 space-y-2">
+        <p className="text-xs font-medium text-slate-400 uppercase tracking-wider mb-2">Breakdown Pendapatan</p>
+        {paymentBreakdown.map((b) => (
+          <div key={b.method} className="flex justify-between text-sm">
+          <span className="text-slate-300">{b.label}</span>
+          <span className="text-slate-100 font-medium">{formatCurrency(b.total)}</span>
+          </div>
+        ))}
+        <div className="border-t border-slate-700 pt-2 flex justify-between text-sm font-bold">
+        <span className="text-slate-200">Total Pendapatan</span>
+        <span className="text-orange-400">
+        {formatCurrency(paymentBreakdown.reduce((s, b) => s + b.total, 0))}
+        </span>
+        </div>
+        </div>
+      )}
+      {!breakdownLoading && paymentBreakdown.length === 0 && (
+        <div className="text-center text-slate-500 text-sm py-2">Belum ada transaksi di sesi ini.</div>
+      )}
+
+      {/* Actual Cash Count */}
       <div className="space-y-2">
-      <label className="text-sm font-medium text-slate-300">Total Uang Fisik (Rp)</label>
+      <label className="text-sm font-medium text-slate-300">Actual Cash Count (Rp)</label>
       <Input
       type="number"
       placeholder="0"
       value={cashCounted}
       onChange={(e) => setCashCounted(e.target.value)}
       className="bg-slate-800 border-slate-700 text-white"
-      autoFocus
       />
       </div>
 
+      {/* Variance */}
+      {cashCounted && (
+        <div className="bg-slate-800/60 border border-slate-700 rounded p-3">
+        <p className="text-xs text-slate-400 mb-1">Variance (Actual - Expected)</p>
+        <p className={`text-base font-semibold ${
+          parseFloat(cashCounted) - expectedCashFromQuery === 0
+          ? 'text-green-400'
+      : parseFloat(cashCounted) - expectedCashFromQuery > 0
+      ? 'text-orange-400'
+      : 'text-red-400'
+        }`}>
+        {formatCurrency(parseFloat(cashCounted) - expectedCashFromQuery)}
+        </p>
+        </div>
+      )}
+
+      {/* Closing Note */}
       <div className="space-y-2">
       <label className="text-sm font-medium text-slate-300">Catatan Penutupan</label>
       <Input
@@ -1416,23 +1517,6 @@ export default function PosPage() {
       className="bg-slate-800 border-slate-700 text-white"
       />
       </div>
-
-      {cashCounted && (
-        <div
-        className={`p-3 rounded-lg text-sm flex justify-between items-center ${
-          parseFloat(cashCounted) - (registerSession?.current_balance || 0) === 0
-          ? 'bg-green-500/10 text-green-400'
-          : 'bg-red-500/10 text-red-400'
-        }`}
-        >
-        <span>Selisih:</span>
-        <span className="font-bold">
-        {formatCurrency(
-          parseFloat(cashCounted) - (registerSession?.current_balance || 0)
-        )}
-        </span>
-        </div>
-      )}
       </div>
       <DialogFooter>
       <Button
@@ -1444,7 +1528,7 @@ export default function PosPage() {
       </Button>
       <Button
       onClick={handleCloseRegister}
-      disabled={saving || !cashCounted}
+      disabled={saving || !cashCounted || breakdownLoading}
       className="bg-red-500 hover:bg-red-600 text-white"
       >
       {saving ? 'Memproses...' : 'Tutup Register'}

@@ -34,6 +34,7 @@ export default function CashRegisterPage() {
   const [expectedCash, setExpectedCash] = useState<number>(0);
   const [expectedLoading, setExpectedLoading] = useState(false);
   const [closeNote, setCloseNote] = useState('');
+  const [paymentBreakdown, setPaymentBreakdown] = useState<{ method: string; label: string; total: number }[]>([]);
 
   const isAdmin = employee?.role === 'admin';
   const openedByLabel = employee?.name || user?.email || '-';
@@ -71,11 +72,11 @@ export default function CashRegisterPage() {
     try {
       setHistoryLoading(true);
       const res = await pb
-        .collection('cash_register_sessions')
-        .getList<CashRegisterSession>(historyPage, 10, {
-          filter: `user_id = "${user.id}"`,
-          sort: '-open_time',
-        });
+      .collection('cash_register_sessions')
+      .getList<CashRegisterSession>(historyPage, 10, {
+        filter: `user_id = "${user.id}"`,
+        sort: '-open_time',
+      });
       setHistory(res.items);
       setHistoryTotalPages(res.totalPages || 1);
     } catch (error: any) {
@@ -142,21 +143,39 @@ export default function CashRegisterPage() {
 
     try {
       setExpectedLoading(true);
-      let totalCash = 0;
 
       const res = await pb
-        .collection('payments')
-        .getList<Payment>(1, 500, {
-          filter: `session_id = "${session.id}" && method = "cash"`,
-        });
+      .collection('payments')
+      .getList<Payment>(1, 500, {
+        filter: `session_id = "${session.id}"`,
+      });
 
-      totalCash = res.items.reduce((sum, p) => sum + (p.amount || 0), 0);
+      const methodLabels: Record<string, string> = {
+        cash: 'Cash',
+        qris: 'QRIS',
+        transfer_bank: 'Transfer Bank',
+        giro: 'Giro',
+        cheque: 'Cek',
+      };
+      const grouped: Record<string, number> = {};
+      for (const p of res.items) {
+        const m = p.method || 'other';
+        grouped[m] = (grouped[m] || 0) + (p.amount || 0);
+      }
+      const breakdown = Object.entries(grouped).map(([method, total]) => ({
+        method,
+        label: methodLabels[method] || method,
+        total,
+      }));
+      setPaymentBreakdown(breakdown);
 
+      const totalCash = grouped['cash'] || 0;
       const calculatedExpected = (session.opening_balance || 0) + totalCash;
       setExpectedCash(calculatedExpected);
       setActualCash(calculatedExpected);
     } catch (error: any) {
       console.error('[v0] Calculate expected cash error (fallback to opening balance):', error);
+      setPaymentBreakdown([]);
       setExpectedCash(session.opening_balance || 0);
       setActualCash(session.opening_balance || 0);
     } finally {
@@ -194,12 +213,13 @@ export default function CashRegisterPage() {
         close_time: now,
         closing_balance: actualCash,
         notes: closeNote.trim(),
-        status: 'closed',
+                                                                            status: 'closed',
       })) as CashRegisterSession;
       setSession(null);
       setCloseDialogOpen(false);
       setActualCash(0);
       setCloseNote('');
+      setPaymentBreakdown([]);
       await fetchHistory();
       toast.success('Cash register berhasil ditutup');
     } catch (error: any) {
@@ -213,435 +233,457 @@ export default function CashRegisterPage() {
 
   return (
     <MainLayout title="Cash Register">
-      <div className="space-y-6">
-        <div className="bg-slate-900 border border-slate-700 rounded-lg p-6">
-          <h1 className="text-2xl font-semibold text-white mb-2">Cash Register</h1>
-          <p className="text-sm text-slate-400 mb-4">
-            Kelola pembukaan dan penutupan kas harian. Transaksi PoS hanya dapat dilakukan saat
-            cash register dalam kondisi terbuka.
-          </p>
+    <div className="space-y-6">
+    <div className="bg-slate-900 border border-slate-700 rounded-lg p-6">
+    <h1 className="text-2xl font-semibold text-white mb-2">Cash Register</h1>
+    <p className="text-sm text-slate-400 mb-4">
+    Kelola pembukaan dan penutupan kas harian. Transaksi PoS hanya dapat dilakukan saat
+    cash register dalam kondisi terbuka.
+    </p>
 
-          {loading ? (
-            <div className="text-slate-400 text-sm">Memuat status cash register...</div>
-          ) : !session ? (
-            <div className="space-y-4">
-              <div className="bg-slate-800 border border-slate-700 rounded-lg p-4">
-                <p className="text-sm text-slate-200 font-semibold mb-2">
-                  Cash register belum dibuka
-                </p>
-                <p className="text-xs text-slate-400 mb-4">
-                  Klik tombol di bawah untuk membuka cash register dan memulai sesi transaksi.
-                </p>
-                <Button
-                  type="button"
-                  onClick={() => setOpenDialogOpen(true)}
-                  className="bg-green-600 hover:bg-green-700 text-white"
-                >
-                  Buka Cash Register
-                </Button>
-              </div>
-            </div>
-          ) : (
-            <div className="space-y-4">
-              <div className="bg-slate-800 border border-slate-700 rounded-lg p-4">
-                <p className="text-sm text-green-400 font-semibold mb-2">
-                  Cash register sedang terbuka
-                </p>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
-                  <div>
-                    <p className="text-slate-400 text-xs mb-1">Dibuka oleh</p>
-                    <p className="text-slate-200 text-sm">{user?.email}</p>
-                  </div>
-                  <div>
-                    <p className="text-slate-400 text-xs mb-1">Waktu buka</p>
-                    <p className="text-slate-200 text-sm">{formatDateTime(session.open_time)}</p>
-                  </div>
-                  <div>
-                    <p className="text-slate-400 text-xs mb-1">Saldo awal</p>
-                    <p className="text-slate-200 text-sm">
-                      {formatCurrency(session.opening_balance || 0)}
-                    </p>
-                  </div>
-                </div>
-              </div>
-
-              <div className="bg-slate-800 border border-slate-700 rounded-lg p-4">
-                <p className="text-sm text-slate-200 font-semibold mb-2">Tutup cash register</p>
-                <p className="text-xs text-slate-400 mb-3">
-                  Klik tombol di bawah untuk menghitung Expected Cash dan mengisi saldo akhir
-                  aktual di dialog konfirmasi.
-                </p>
-                <div className="flex items-center justify-end">
-                  <Button
-                    type="button"
-                    onClick={handleCloseClick}
-                    disabled={
-                      saving ||
-                      !session ||
-                      (!isAdmin && session.user_id !== user?.id)
-                    }
-                    className="bg-red-600 hover:bg-red-700 text-white"
-                  >
-                    {saving ? 'Menutup...' : 'Tutup Cash Register'}
-                  </Button>
-                </div>
-              </div>
-            </div>
-          )}
-        </div>
-
-        <div className="bg-slate-900 border border-slate-700 rounded-lg p-6">
-          <h2 className="text-lg font-semibold text-white mb-4">Riwayat Cash Register</h2>
-          <p className="text-xs text-slate-400 mb-4">
-            Riwayat pembukaan dan penutupan cash register. Ditampilkan per 10 sesi, urut dari yang
-            terbaru.
-          </p>
-
-          {historyLoading ? (
-            <div className="text-slate-400 text-sm">Memuat histori cash register...</div>
-          ) : history.length === 0 ? (
-            <div className="text-slate-500 text-sm">Belum ada histori cash register.</div>
-          ) : (
-            <div className="space-y-3">
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="border-b border-slate-700 bg-slate-800/50">
-                      <th className="px-4 py-3 text-left text-xs font-semibold text-slate-300 uppercase">
-                        Waktu Buka
-                      </th>
-                      <th className="px-4 py-3 text-left text-xs font-semibold text-slate-300 uppercase">
-                        Waktu Tutup
-                      </th>
-                      <th className="px-4 py-3 text-right text-xs font-semibold text-slate-300 uppercase">
-                        Saldo Awal
-                      </th>
-                      <th className="px-4 py-3 text-right text-xs font-semibold text-slate-300 uppercase">
-                        Saldo Akhir
-                      </th>
-                      <th className="px-4 py-3 text-right text-xs font-semibold text-slate-300 uppercase">
-                        Variance
-                      </th>
-                      <th className="px-4 py-3 text-left text-xs font-semibold text-slate-300 uppercase">
-                        Dibuka oleh
-                      </th>
-                      <th className="px-4 py-3 text-center text-xs font-semibold text-slate-300 uppercase">
-                        Status
-                      </th>
-                      <th className="px-4 py-3 text-center text-xs font-semibold text-slate-300 uppercase">
-                        Aksi
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {history.map((item) => (
-                      <tr
-                        key={item.id}
-                        className="border-b border-slate-800 hover:bg-slate-800/60 transition-colors"
-                      >
-                        <td className="px-4 py-3 text-slate-200">
-                          {formatDateTime(item.open_time)}
-                        </td>
-                        <td className="px-4 py-3 text-slate-200">
-                          {item.close_time ? formatDateTime(item.close_time) : '-'}
-                        </td>
-                        <td className="px-4 py-3 text-right text-slate-200">
-                          {formatCurrency(item.opening_balance || 0)}
-                        </td>
-                        <td className="px-4 py-3 text-right text-slate-200">
-                          {item.closing_balance != null
-                            ? formatCurrency(item.closing_balance)
-                            : '-'}
-                        </td>
-                        <td className="px-4 py-3 text-right text-slate-200">
-                          {item.closing_balance != null
-                            ? formatCurrency(
-                                (item.closing_balance || 0) - (item.opening_balance || 0)
-                              )
-                            : '-'}
-                        </td>
-                        <td className="px-4 py-3 text-slate-200">
-                          {openedByLabel}
-                        </td>
-                        <td className="px-4 py-3 text-center">
-                          <span
-                            className={`inline-flex px-2 py-1 text-xs rounded-full font-medium ${
-                              item.status === 'open'
-                                ? 'bg-green-500/10 text-green-400'
-                                : 'bg-slate-600/20 text-slate-200'
-                            }`}
-                          >
-                            {item.status === 'open'
-                              ? `Terbuka oleh ${openedByLabel}`
-                              : `Ditutup oleh ${openedByLabel}`}
-                          </span>
-                        </td>
-                        <td className="px-4 py-3 text-center">
-                          <Button
-                            type="button"
-                            size="sm"
-                            variant="outline"
-                            className="border-blue-600 text-blue-400 hover:bg-blue-600 hover:text-white"
-                            onClick={() => {
-                              setSelectedHistory(item);
-                              setViewDialogOpen(true);
-                            }}
-                          >
-                            Lihat
-                          </Button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-
-              <div className="flex items-center justify-between pt-1">
-                <p className="text-xs text-slate-400">
-                  Halaman <span className="font-semibold text-slate-200">{historyPage}</span> dari{' '}
-                  <span className="font-semibold text-slate-200">{historyTotalPages}</span>
-                </p>
-                <div className="flex gap-2">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    disabled={historyPage <= 1 || historyLoading}
-                    onClick={() => setHistoryPage((p) => Math.max(1, p - 1))}
-                    className="border-slate-700 text-slate-200 hover:text-white"
-                  >
-                    Sebelumnya
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    disabled={historyPage >= historyTotalPages || historyLoading}
-                    onClick={() =>
-                      setHistoryPage((p) =>
-                        historyTotalPages > 0 ? Math.min(historyTotalPages, p + 1) : p + 1
-                      )
-                    }
-                    className="border-slate-700 text-slate-200 hover:text-white"
-                  >
-                    Berikutnya
-                  </Button>
-                </div>
-              </div>
-            </div>
-          )}
-        </div>
-
-        <Dialog open={openDialogOpen} onOpenChange={setOpenDialogOpen}>
-          <DialogContent className="sm:max-w-[420px] bg-slate-900 border border-slate-700">
-            <DialogHeader>
-              <DialogTitle className="text-white">Buka Cash Register</DialogTitle>
-              <DialogDescription className="text-slate-400">
-                Masukkan saldo awal kas di laci sebelum mulai bertransaksi di PoS.
-              </DialogDescription>
-            </DialogHeader>
-            <div className="space-y-4 pt-2">
-              <div>
-                <label className="block text-sm font-medium text-slate-300 mb-1">
-                  Saldo Awal Kas (Rp)
-                </label>
-                <Input
-                  type="number"
-                  min={0}
-                  value={openingBalance}
-                  onChange={(e) => setOpeningBalance(Number(e.target.value) || 0)}
-                  className="bg-slate-800 border-slate-700 text-white"
-                  placeholder="Contoh: 500000"
-                />
-              </div>
-              <div className="flex justify-end gap-2 pt-2">
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={() => setOpenDialogOpen(false)}
-                  className="border-slate-700 text-slate-200 hover:text-white"
-                >
-                  Batal
-                </Button>
-                <Button
-                  type="button"
-                  onClick={handleOpen}
-                  disabled={saving}
-                  className="bg-green-600 hover:bg-green-700 text-white"
-                >
-                  {saving ? 'Membuka...' : 'Konfirmasi & Buka'}
-                </Button>
-              </div>
-            </div>
-          </DialogContent>
-        </Dialog>
-
-        <Dialog open={closeDialogOpen} onOpenChange={setCloseDialogOpen}>
-          <DialogContent className="sm:max-w-[420px] bg-slate-900 border border-slate-700">
-            <DialogHeader>
-              <DialogTitle className="text-white">Konfirmasi Tutup Cash Register</DialogTitle>
-              <DialogDescription className="text-slate-400">
-                Periksa saldo kas dan isi saldo akhir aktual sebelum menutup cash register.
-              </DialogDescription>
-            </DialogHeader>
-
-            {session && (
-              <div className="space-y-4 mt-2">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
-                  <div className="bg-slate-800/60 border border-slate-700 rounded p-3">
-                    <p className="text-xs text-slate-400 mb-1">Opening Balance</p>
-                    <p className="text-base font-semibold text-slate-100">
-                      {formatCurrency(session.opening_balance || 0)}
-                    </p>
-                  </div>
-                  <div className="bg-slate-800/60 border border-slate-700 rounded p-3">
-                    <p className="text-xs text-slate-400 mb-1">Expected Cash</p>
-                    <p className="text-base font-semibold text-orange-400">
-                      {expectedLoading
-                        ? 'Menghitung...'
-                        : formatCurrency(expectedCash)}
-                    </p>
-                  </div>
-                </div>
-
-                <div className="space-y-2">
-                  <p className="text-sm font-medium text-slate-200">Actual Cash Count</p>
-                  <Input
-                    type="number"
-                    min={0}
-                    value={actualCash}
-                    onChange={(e) => setActualCash(Number(e.target.value) || 0)}
-                    className="bg-slate-800 border-slate-700 text-white"
-                  />
-                </div>
-
-                <div className="bg-slate-800/60 border border-slate-700 rounded p-3">
-                  <p className="text-xs text-slate-400 mb-1">Variance (Actual - Expected)</p>
-                  <p
-                    className={`text-base font-semibold ${
-                      actualCash - expectedCash === 0
-                        ? 'text-green-400'
-                        : actualCash - expectedCash > 0
-                          ? 'text-orange-400'
-                          : 'text-red-400'
-                    }`}
-                  >
-                    {formatCurrency(actualCash - expectedCash)}
-                  </p>
-                </div>
-
-                <div className="space-y-2">
-                  <p className="text-sm font-medium text-slate-200">
-                    Catatan Penutupan (wajib)
-                  </p>
-                  <Input
-                    value={closeNote}
-                    onChange={(e) => setCloseNote(e.target.value)}
-                    placeholder="Contoh: Selisih karena uang kembalian, dll."
-                    className="bg-slate-800 border-slate-700 text-white"
-                  />
-                </div>
-
-                <div className="flex justify-end gap-3 pt-2">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={() => setCloseDialogOpen(false)}
-                    disabled={saving}
-                    className="border-slate-700 text-slate-300 hover:text-white"
-                  >
-                    Batal
-                  </Button>
-                  <Button
-                    type="button"
-                    onClick={handleConfirmClose}
-                    disabled={saving}
-                    className="bg-red-600 hover:bg-red-700 text-white"
-                  >
-                    {saving ? 'Menutup...' : 'Konfirmasi & Tutup'}
-                  </Button>
-                </div>
-              </div>
-            )}
-          </DialogContent>
-        </Dialog>
-
-        <Dialog open={viewDialogOpen} onOpenChange={setViewDialogOpen}>
-          <DialogContent className="sm:max-w-[460px] bg-slate-900 border border-slate-700">
-            <DialogHeader>
-              <DialogTitle className="text-white">Detail Cash Register</DialogTitle>
-              <DialogDescription className="text-slate-400">
-                Detail sesi cash register termasuk saldo dan catatan penutupan.
-              </DialogDescription>
-            </DialogHeader>
-
-            {selectedHistory && (
-              <div className="space-y-4 mt-2 text-sm">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                  <div className="bg-slate-800/60 border border-slate-700 rounded p-3">
-                    <p className="text-xs text-slate-400 mb-1">Waktu Buka</p>
-                    <p className="text-slate-100">
-                      {formatDateTime(selectedHistory.open_time)}
-                    </p>
-                  </div>
-                  <div className="bg-slate-800/60 border border-slate-700 rounded p-3">
-                    <p className="text-xs text-slate-400 mb-1">Waktu Tutup</p>
-                    <p className="text-slate-100">
-                      {selectedHistory.close_time
-                        ? formatDateTime(selectedHistory.close_time)
-                        : '-'}
-                    </p>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                  <div className="bg-slate-800/60 border border-slate-700 rounded p-3">
-                    <p className="text-xs text-slate-400 mb-1">Saldo Awal</p>
-                    <p className="text-base font-semibold text-slate-100">
-                      {formatCurrency(selectedHistory.opening_balance || 0)}
-                    </p>
-                  </div>
-                  <div className="bg-slate-800/60 border border-slate-700 rounded p-3">
-                    <p className="text-xs text-slate-400 mb-1">Saldo Akhir</p>
-                    <p className="text-base font-semibold text-slate-100">
-                      {selectedHistory.closing_balance != null
-                        ? formatCurrency(selectedHistory.closing_balance)
-                        : '-'}
-                    </p>
-                  </div>
-                  <div className="bg-slate-800/60 border border-slate-700 rounded p-3">
-                    <p className="text-xs text-slate-400 mb-1">Variance</p>
-                    <p className="text-base font-semibold text-orange-400">
-                      {selectedHistory.closing_balance != null
-                        ? formatCurrency(
-                            (selectedHistory.closing_balance || 0) -
-                              (selectedHistory.opening_balance || 0)
-                          )
-                        : '-'}
-                    </p>
-                  </div>
-                </div>
-
-                <div className="bg-slate-800/60 border border-slate-700 rounded p-3">
-                  <p className="text-xs text-slate-400 mb-1">Catatan Penutupan</p>
-                  <p className="text-sm text-slate-100 whitespace-pre-line">
-                    {selectedHistory.notes || '-'}
-                  </p>
-                </div>
-
-                <div className="flex justify-end pt-2">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={() => setViewDialogOpen(false)}
-                    className="border-slate-700 text-slate-300 hover:text-white"
-                  >
-                    Tutup
-                  </Button>
-                </div>
-              </div>
-            )}
-          </DialogContent>
-        </Dialog>
+    {loading ? (
+      <div className="text-slate-400 text-sm">Memuat status cash register...</div>
+    ) : !session ? (
+      <div className="space-y-4">
+      <div className="bg-slate-800 border border-slate-700 rounded-lg p-4">
+      <p className="text-sm text-slate-200 font-semibold mb-2">
+      Cash register belum dibuka
+      </p>
+      <p className="text-xs text-slate-400 mb-4">
+      Klik tombol di bawah untuk membuka cash register dan memulai sesi transaksi.
+      </p>
+      <Button
+      type="button"
+      onClick={() => setOpenDialogOpen(true)}
+      className="bg-green-600 hover:bg-green-700 text-white"
+      >
+      Buka Cash Register
+      </Button>
       </div>
+      </div>
+    ) : (
+      <div className="space-y-4">
+      <div className="bg-slate-800 border border-slate-700 rounded-lg p-4">
+      <p className="text-sm text-green-400 font-semibold mb-2">
+      Cash register sedang terbuka
+      </p>
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
+      <div>
+      <p className="text-slate-400 text-xs mb-1">Dibuka oleh</p>
+      <p className="text-slate-200 text-sm">{user?.email}</p>
+      </div>
+      <div>
+      <p className="text-slate-400 text-xs mb-1">Waktu buka</p>
+      <p className="text-slate-200 text-sm">{formatDateTime(session.open_time)}</p>
+      </div>
+      <div>
+      <p className="text-slate-400 text-xs mb-1">Saldo awal</p>
+      <p className="text-slate-200 text-sm">
+      {formatCurrency(session.opening_balance || 0)}
+      </p>
+      </div>
+      </div>
+      </div>
+
+      <div className="bg-slate-800 border border-slate-700 rounded-lg p-4">
+      <p className="text-sm text-slate-200 font-semibold mb-2">Tutup cash register</p>
+      <p className="text-xs text-slate-400 mb-3">
+      Klik tombol di bawah untuk menghitung Expected Cash dan mengisi saldo akhir
+      aktual di dialog konfirmasi.
+      </p>
+      <div className="flex items-center justify-end">
+      <Button
+      type="button"
+      onClick={handleCloseClick}
+      disabled={
+        saving ||
+        !session ||
+        (!isAdmin && session.user_id !== user?.id)
+      }
+      className="bg-red-600 hover:bg-red-700 text-white"
+      >
+      {saving ? 'Menutup...' : 'Tutup Cash Register'}
+      </Button>
+      </div>
+      </div>
+      </div>
+    )}
+    </div>
+
+    <div className="bg-slate-900 border border-slate-700 rounded-lg p-6">
+    <h2 className="text-lg font-semibold text-white mb-4">Riwayat Cash Register</h2>
+    <p className="text-xs text-slate-400 mb-4">
+    Riwayat pembukaan dan penutupan cash register. Ditampilkan per 10 sesi, urut dari yang
+    terbaru.
+    </p>
+
+    {historyLoading ? (
+      <div className="text-slate-400 text-sm">Memuat histori cash register...</div>
+    ) : history.length === 0 ? (
+      <div className="text-slate-500 text-sm">Belum ada histori cash register.</div>
+    ) : (
+      <div className="space-y-3">
+      <div className="overflow-x-auto">
+      <table className="w-full text-sm">
+      <thead>
+      <tr className="border-b border-slate-700 bg-slate-800/50">
+      <th className="px-4 py-3 text-left text-xs font-semibold text-slate-300 uppercase">
+      Waktu Buka
+      </th>
+      <th className="px-4 py-3 text-left text-xs font-semibold text-slate-300 uppercase">
+      Waktu Tutup
+      </th>
+      <th className="px-4 py-3 text-right text-xs font-semibold text-slate-300 uppercase">
+      Saldo Awal
+      </th>
+      <th className="px-4 py-3 text-right text-xs font-semibold text-slate-300 uppercase">
+      Saldo Akhir
+      </th>
+      <th className="px-4 py-3 text-right text-xs font-semibold text-slate-300 uppercase">
+      Variance
+      </th>
+      <th className="px-4 py-3 text-left text-xs font-semibold text-slate-300 uppercase">
+      Dibuka oleh
+      </th>
+      <th className="px-4 py-3 text-center text-xs font-semibold text-slate-300 uppercase">
+      Status
+      </th>
+      <th className="px-4 py-3 text-center text-xs font-semibold text-slate-300 uppercase">
+      Aksi
+      </th>
+      </tr>
+      </thead>
+      <tbody>
+      {history.map((item) => (
+        <tr
+        key={item.id}
+        className="border-b border-slate-800 hover:bg-slate-800/60 transition-colors"
+        >
+        <td className="px-4 py-3 text-slate-200">
+        {formatDateTime(item.open_time)}
+        </td>
+        <td className="px-4 py-3 text-slate-200">
+        {item.close_time ? formatDateTime(item.close_time) : '-'}
+        </td>
+        <td className="px-4 py-3 text-right text-slate-200">
+        {formatCurrency(item.opening_balance || 0)}
+        </td>
+        <td className="px-4 py-3 text-right text-slate-200">
+        {item.closing_balance != null
+          ? formatCurrency(item.closing_balance)
+          : '-'}
+          </td>
+          <td className="px-4 py-3 text-right text-slate-200">
+          {item.closing_balance != null
+            ? formatCurrency(
+              (item.closing_balance || 0) - (item.opening_balance || 0)
+            )
+            : '-'}
+            </td>
+            <td className="px-4 py-3 text-slate-200">
+            {openedByLabel}
+            </td>
+            <td className="px-4 py-3 text-center">
+            <span
+            className={`inline-flex px-2 py-1 text-xs rounded-full font-medium ${
+              item.status === 'open'
+              ? 'bg-green-500/10 text-green-400'
+              : 'bg-slate-600/20 text-slate-200'
+            }`}
+            >
+            {item.status === 'open'
+              ? `Terbuka oleh ${openedByLabel}`
+              : `Ditutup oleh ${openedByLabel}`}
+              </span>
+              </td>
+              <td className="px-4 py-3 text-center">
+              <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              className="border-blue-600 text-blue-400 hover:bg-blue-600 hover:text-white"
+              onClick={() => {
+                setSelectedHistory(item);
+                setViewDialogOpen(true);
+              }}
+              >
+              Lihat
+              </Button>
+              </td>
+              </tr>
+      ))}
+      </tbody>
+      </table>
+      </div>
+
+      <div className="flex items-center justify-between pt-1">
+      <p className="text-xs text-slate-400">
+      Halaman <span className="font-semibold text-slate-200">{historyPage}</span> dari{' '}
+      <span className="font-semibold text-slate-200">{historyTotalPages}</span>
+      </p>
+      <div className="flex gap-2">
+      <Button
+      type="button"
+      variant="outline"
+      disabled={historyPage <= 1 || historyLoading}
+      onClick={() => setHistoryPage((p) => Math.max(1, p - 1))}
+      className="border-slate-700 text-slate-200 hover:text-white"
+      >
+      Sebelumnya
+      </Button>
+      <Button
+      type="button"
+      variant="outline"
+      disabled={historyPage >= historyTotalPages || historyLoading}
+      onClick={() =>
+        setHistoryPage((p) =>
+        historyTotalPages > 0 ? Math.min(historyTotalPages, p + 1) : p + 1
+        )
+      }
+      className="border-slate-700 text-slate-200 hover:text-white"
+      >
+      Berikutnya
+      </Button>
+      </div>
+      </div>
+      </div>
+    )}
+    </div>
+
+    <Dialog open={openDialogOpen} onOpenChange={setOpenDialogOpen}>
+    <DialogContent className="sm:max-w-[420px] bg-slate-900 border border-slate-700">
+    <DialogHeader>
+    <DialogTitle className="text-white">Buka Cash Register</DialogTitle>
+    <DialogDescription className="text-slate-400">
+    Masukkan saldo awal kas di laci sebelum mulai bertransaksi di PoS.
+    </DialogDescription>
+    </DialogHeader>
+    <div className="space-y-4 pt-2">
+    <div>
+    <label className="block text-sm font-medium text-slate-300 mb-1">
+    Saldo Awal Kas (Rp)
+    </label>
+    <Input
+    type="number"
+    min={0}
+    value={openingBalance}
+    onChange={(e) => setOpeningBalance(Number(e.target.value) || 0)}
+    className="bg-slate-800 border-slate-700 text-white"
+    placeholder="Contoh: 500000"
+    />
+    </div>
+    <div className="flex justify-end gap-2 pt-2">
+    <Button
+    type="button"
+    variant="outline"
+    onClick={() => setOpenDialogOpen(false)}
+    className="border-slate-700 text-slate-200 hover:text-white"
+    >
+    Batal
+    </Button>
+    <Button
+    type="button"
+    onClick={handleOpen}
+    disabled={saving}
+    className="bg-green-600 hover:bg-green-700 text-white"
+    >
+    {saving ? 'Membuka...' : 'Konfirmasi & Buka'}
+    </Button>
+    </div>
+    </div>
+    </DialogContent>
+    </Dialog>
+
+    <Dialog open={closeDialogOpen} onOpenChange={setCloseDialogOpen}>
+    <DialogContent className="sm:max-w-[420px] bg-slate-900 border border-slate-700">
+    <DialogHeader>
+    <DialogTitle className="text-white">Konfirmasi Tutup Cash Register</DialogTitle>
+    <DialogDescription className="text-slate-400">
+    Periksa saldo kas dan isi saldo akhir aktual sebelum menutup cash register.
+    </DialogDescription>
+    </DialogHeader>
+
+    {session && (
+      <div className="space-y-4 mt-2">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
+      <div className="bg-slate-800/60 border border-slate-700 rounded p-3">
+      <p className="text-xs text-slate-400 mb-1">Opening Balance</p>
+      <p className="text-base font-semibold text-slate-100">
+      {formatCurrency(session.opening_balance || 0)}
+      </p>
+      </div>
+      <div className="bg-slate-800/60 border border-slate-700 rounded p-3">
+      <p className="text-xs text-slate-400 mb-1">Expected Cash</p>
+      <p className="text-base font-semibold text-orange-400">
+      {expectedLoading
+        ? 'Menghitung...'
+    : formatCurrency(expectedCash)}
+    </p>
+    </div>
+    </div>
+
+    {/* Payment Breakdown */}
+    {!expectedLoading && paymentBreakdown.length > 0 && (
+      <div className="bg-slate-800/40 border border-slate-700 rounded-lg p-3 space-y-2">
+      <p className="text-xs font-medium text-slate-400 uppercase tracking-wider mb-2">Breakdown Pendapatan</p>
+      {paymentBreakdown.map((b) => (
+        <div key={b.method} className="flex justify-between text-sm">
+        <span className="text-slate-300">{b.label}</span>
+        <span className="text-slate-100 font-medium">{formatCurrency(b.total)}</span>
+        </div>
+      ))}
+      <div className="border-t border-slate-700 pt-2 flex justify-between text-sm font-bold">
+      <span className="text-slate-200">Total Pendapatan</span>
+      <span className="text-orange-400">
+      {formatCurrency(paymentBreakdown.reduce((s, b) => s + b.total, 0))}
+      </span>
+      </div>
+      </div>
+    )}
+    {!expectedLoading && paymentBreakdown.length === 0 && (
+      <div className="text-center text-slate-500 text-sm py-1">Belum ada transaksi di sesi ini.</div>
+    )}
+
+    <div className="space-y-2">
+    <p className="text-sm font-medium text-slate-200">Actual Cash Count</p>
+    <Input
+    type="number"
+    min={0}
+    value={actualCash}
+    onChange={(e) => setActualCash(Number(e.target.value) || 0)}
+    className="bg-slate-800 border-slate-700 text-white"
+    />
+    </div>
+
+    <div className="bg-slate-800/60 border border-slate-700 rounded p-3">
+    <p className="text-xs text-slate-400 mb-1">Variance (Actual - Expected)</p>
+    <p
+    className={`text-base font-semibold ${
+      actualCash - expectedCash === 0
+      ? 'text-green-400'
+    : actualCash - expectedCash > 0
+    ? 'text-orange-400'
+    : 'text-red-400'
+    }`}
+    >
+    {formatCurrency(actualCash - expectedCash)}
+    </p>
+    </div>
+
+    <div className="space-y-2">
+    <p className="text-sm font-medium text-slate-200">
+    Catatan Penutupan (wajib)
+    </p>
+    <Input
+    value={closeNote}
+    onChange={(e) => setCloseNote(e.target.value)}
+    placeholder="Contoh: Selisih karena uang kembalian, dll."
+    className="bg-slate-800 border-slate-700 text-white"
+    />
+    </div>
+
+    <div className="flex justify-end gap-3 pt-2">
+    <Button
+    type="button"
+    variant="outline"
+    onClick={() => setCloseDialogOpen(false)}
+    disabled={saving}
+    className="border-slate-700 text-slate-300 hover:text-white"
+    >
+    Batal
+    </Button>
+    <Button
+    type="button"
+    onClick={handleConfirmClose}
+    disabled={saving}
+    className="bg-red-600 hover:bg-red-700 text-white"
+    >
+    {saving ? 'Menutup...' : 'Konfirmasi & Tutup'}
+    </Button>
+    </div>
+    </div>
+    )}
+    </DialogContent>
+    </Dialog>
+
+    <Dialog open={viewDialogOpen} onOpenChange={setViewDialogOpen}>
+    <DialogContent className="sm:max-w-[460px] bg-slate-900 border border-slate-700">
+    <DialogHeader>
+    <DialogTitle className="text-white">Detail Cash Register</DialogTitle>
+    <DialogDescription className="text-slate-400">
+    Detail sesi cash register termasuk saldo dan catatan penutupan.
+    </DialogDescription>
+    </DialogHeader>
+
+    {selectedHistory && (
+      <div className="space-y-4 mt-2 text-sm">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+      <div className="bg-slate-800/60 border border-slate-700 rounded p-3">
+      <p className="text-xs text-slate-400 mb-1">Waktu Buka</p>
+      <p className="text-slate-100">
+      {formatDateTime(selectedHistory.open_time)}
+      </p>
+      </div>
+      <div className="bg-slate-800/60 border border-slate-700 rounded p-3">
+      <p className="text-xs text-slate-400 mb-1">Waktu Tutup</p>
+      <p className="text-slate-100">
+      {selectedHistory.close_time
+        ? formatDateTime(selectedHistory.close_time)
+        : '-'}
+        </p>
+        </div>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+        <div className="bg-slate-800/60 border border-slate-700 rounded p-3">
+        <p className="text-xs text-slate-400 mb-1">Saldo Awal</p>
+        <p className="text-base font-semibold text-slate-100">
+        {formatCurrency(selectedHistory.opening_balance || 0)}
+        </p>
+        </div>
+        <div className="bg-slate-800/60 border border-slate-700 rounded p-3">
+        <p className="text-xs text-slate-400 mb-1">Saldo Akhir</p>
+        <p className="text-base font-semibold text-slate-100">
+        {selectedHistory.closing_balance != null
+          ? formatCurrency(selectedHistory.closing_balance)
+          : '-'}
+          </p>
+          </div>
+          <div className="bg-slate-800/60 border border-slate-700 rounded p-3">
+          <p className="text-xs text-slate-400 mb-1">Variance</p>
+          <p className="text-base font-semibold text-orange-400">
+          {selectedHistory.closing_balance != null
+            ? formatCurrency(
+              (selectedHistory.closing_balance || 0) -
+              (selectedHistory.opening_balance || 0)
+            )
+            : '-'}
+            </p>
+            </div>
+            </div>
+
+            <div className="bg-slate-800/60 border border-slate-700 rounded p-3">
+            <p className="text-xs text-slate-400 mb-1">Catatan Penutupan</p>
+            <p className="text-sm text-slate-100 whitespace-pre-line">
+            {selectedHistory.notes || '-'}
+            </p>
+            </div>
+
+            <div className="flex justify-end pt-2">
+            <Button
+            type="button"
+            variant="outline"
+            onClick={() => setViewDialogOpen(false)}
+            className="border-slate-700 text-slate-300 hover:text-white"
+            >
+            Tutup
+            </Button>
+            </div>
+            </div>
+    )}
+    </DialogContent>
+    </Dialog>
+    </div>
     </MainLayout>
   );
 }
