@@ -50,6 +50,8 @@ export default function PosPage() {
   const [recentOrders, setRecentOrders] = useState<Order[]>([]);
   const [orderDialogOpen, setOrderDialogOpen] = useState(false);
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
+  const [orderStatusDialogOpen, setOrderStatusDialogOpen] = useState(false);
+  const [orderStatusDetails, setOrderStatusDetails] = useState<any>(null);
 
   // Cash Register State
   const [registerDialogOpen, setRegisterDialogOpen] = useState(false);
@@ -601,6 +603,127 @@ export default function PosPage() {
     }
   };
 
+  const handleViewOrderStatus = () => {
+    if (!selectedOrder) return;
+    const orderItems = selectedOrder.expand?.order_items_via_order_id || [];
+    const customer = selectedOrder.expand?.customer_id as Customer;
+    setOrderStatusDetails({
+      orderId: selectedOrder.order_number,
+      invoiceNumber: '',
+      date: selectedOrder.order_date
+      ? new Date(selectedOrder.order_date).toLocaleString('id-ID')
+      : '-',
+      cashierName: cashierName,
+      customerName: customer?.name || 'Guest',
+      status: selectedOrder.status,
+      items: orderItems.map((item: any) => ({
+        quantity: item.quantity,
+        menu: {
+          name: (item.expand?.menu_id as MenuItem)?.name || 'Unknown Item',
+                                            price: item.unit_price ?? (item.total / item.quantity),
+        },
+        total: item.total,
+      })),
+      subtotal: selectedOrder.subtotal ?? selectedOrder.total,
+      tax: selectedOrder.tax ?? 0,
+      total: selectedOrder.total,
+      paymentMethod: selectedOrder.payment_type
+      ? selectedOrder.payment_type === 'cash'
+      ? 'Cash'
+    : selectedOrder.payment_type.toUpperCase()
+    : '-',
+    });
+    setOrderDialogOpen(false);
+    setTimeout(() => setOrderStatusDialogOpen(true), 150);
+  };
+
+  const handlePrintOrderReceipt = (details: any) => {
+    if (!details) return;
+    const { orderId, date, customerName: cust, cashierName: kasir, items, subtotal: sub, tax, total: tot, paymentMethod: method, status } = details;
+
+    const itemsHtml = items.map((item: any) => `
+    <tr>
+    <td style="padding:2px 0">${item.menu.name}</td>
+    <td style="text-align:center;padding:2px 4px">${item.quantity}x</td>
+    <td style="text-align:right;padding:2px 0">${formatCurrency(item.menu.price * item.quantity)}</td>
+    </tr>
+    `).join('');
+
+    const statusLabel: Record<string, string> = {
+      completed: 'Selesai', confirmed: 'Terkonfirmasi', cancelled: 'Dibatalkan', pending: 'Pending',
+    };
+
+    const receiptHtml = `
+    <!DOCTYPE html>
+    <html>
+    <head>
+    <meta charset="utf-8"/>
+    <title>Struk - ${orderId}</title>
+    <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: 'Courier New', Courier, monospace; font-size: 12px; width: 80mm; margin: 0 auto; padding: 8px; color: #000; }
+    .header { text-align: center; margin-bottom: 8px; }
+    .header h1 { font-size: 16px; font-weight: bold; letter-spacing: 1px; }
+    .header p { font-size: 11px; }
+    .divider { border-top: 1px dashed #000; margin: 6px 0; }
+    .divider-solid { border-top: 1px solid #000; margin: 6px 0; }
+    .info-row { display: flex; justify-content: space-between; font-size: 11px; margin-bottom: 2px; }
+    table { width: 100%; border-collapse: collapse; }
+    th { font-size: 11px; text-align: left; padding: 2px 0; border-bottom: 1px dashed #000; }
+    th:last-child { text-align: right; }
+    th:nth-child(2) { text-align: center; }
+    td { font-size: 11px; vertical-align: top; }
+    .totals { width: 100%; margin-top: 4px; }
+    .totals td { padding: 1px 0; }
+    .grand-total td { font-weight: bold; font-size: 13px; padding-top: 4px; }
+    .footer { text-align: center; margin-top: 8px; font-size: 11px; }
+    @media print { body { width: 80mm; } @page { margin: 0; size: 80mm auto; } }
+    </style>
+    </head>
+    <body>
+    <div class="header">
+    <h1>LEDGR POS</h1>
+    <p>Struk Pesanan</p>
+    </div>
+    <div class="divider"></div>
+    <div class="info-row"><span>No. Order</span><span>${orderId}</span></div>
+    <div class="info-row"><span>Tanggal</span><span>${date}</span></div>
+    <div class="info-row"><span>Kasir</span><span>${kasir}</span></div>
+    <div class="info-row"><span>Pelanggan</span><span>${cust}</span></div>
+    <div class="info-row"><span>Status</span><span>${statusLabel[status] || status}</span></div>
+    <div class="divider"></div>
+    <table>
+    <thead>
+    <tr>
+    <th>Item</th><th style="text-align:center">Qty</th><th style="text-align:right">Harga</th>
+    </tr>
+    </thead>
+    <tbody>${itemsHtml}</tbody>
+    </table>
+    <div class="divider"></div>
+    <table class="totals">
+    <tr><td>Subtotal</td><td style="text-align:right">${formatCurrency(sub)}</td></tr>
+    <tr><td>Pajak</td><td style="text-align:right">${formatCurrency(tax)}</td></tr>
+    </table>
+    <div class="divider-solid"></div>
+    <table class="totals grand-total">
+    <tr><td>TOTAL</td><td style="text-align:right">${formatCurrency(tot)}</td></tr>
+    <tr><td style="font-size:11px;font-weight:normal">Metode Bayar</td><td style="text-align:right;font-size:11px;font-weight:normal">${method}</td></tr>
+    </table>
+    <div class="divider"></div>
+    <div class="footer"><p>*** Terima Kasih ***</p><p>Semoga Anda puas dengan layanan kami</p></div>
+    <script>window.onload = function(){ window.print(); window.onafterprint = function(){ window.close(); }; }</script>
+    </body>
+    </html>
+    `;
+
+    const printWindow = window.open('', '_blank', 'width=400,height=600');
+    if (printWindow) {
+      printWindow.document.write(receiptHtml);
+      printWindow.document.close();
+    }
+  };
+
   const handlePrintReceipt = () => {
     if (!lastOrderDetails) return;
     const { orderId, invoiceNumber, date, customerName, cashierName: kasir, items, subtotal: sub, tax, total: tot, paymentMethod: method } = lastOrderDetails;
@@ -1068,7 +1191,14 @@ export default function PosPage() {
           </span>
           </div>
 
-          <div className="flex justify-end pt-2">
+          <div className="flex justify-between items-center pt-2">
+          <Button
+          onClick={handleViewOrderStatus}
+          className="bg-blue-600 hover:bg-blue-700 text-white gap-2"
+          >
+          <CheckCircle2 size={15} />
+          Status Order
+          </Button>
           <Button
           variant="outline"
           onClick={() => setOrderDialogOpen(false)}
@@ -1078,6 +1208,122 @@ export default function PosPage() {
           </Button>
           </div>
           </div>
+      )}
+      </DialogContent>
+      </Dialog>
+
+      {/* Order Status Dialog */}
+      <Dialog open={orderStatusDialogOpen} onOpenChange={setOrderStatusDialogOpen}>
+      <DialogContent className="sm:max-w-[420px] bg-slate-900 border border-slate-700">
+      <DialogHeader>
+      <div className="mx-auto bg-blue-500/10 p-3 rounded-full mb-2">
+      <CheckCircle2 className="h-8 w-8 text-blue-400" />
+      </div>
+      <DialogTitle className="text-center text-white text-xl">
+      Status Order
+      </DialogTitle>
+      <DialogDescription className="text-center text-slate-400">
+      Detail lengkap pesanan ini.
+      </DialogDescription>
+      </DialogHeader>
+
+      {orderStatusDetails && (
+        <div className="space-y-4 mt-2">
+        {/* Status badge */}
+        <div className="flex justify-center">
+        <span
+        className={`px-4 py-1.5 rounded-full text-sm font-bold ${
+          orderStatusDetails.status === 'completed'
+          ? 'bg-green-500/20 text-green-400 border border-green-500/30'
+          : orderStatusDetails.status === 'confirmed'
+          ? 'bg-blue-500/20 text-blue-400 border border-blue-500/30'
+          : orderStatusDetails.status === 'cancelled'
+          ? 'bg-red-500/20 text-red-400 border border-red-500/30'
+          : 'bg-slate-700 text-slate-300 border border-slate-600'
+        }`}
+        >
+        {{
+          completed: '✓ Selesai',
+          confirmed: '⏳ Terkonfirmasi',
+          cancelled: '✕ Dibatalkan',
+        }[orderStatusDetails.status as string] || orderStatusDetails.status}
+        </span>
+        </div>
+
+        <div className="bg-slate-800/50 rounded-lg p-4 space-y-3 text-sm">
+        <div className="flex justify-between">
+        <span className="text-slate-400">No. Order</span>
+        <span className="text-slate-200 font-mono">{orderStatusDetails.orderId}</span>
+        </div>
+        <div className="flex justify-between">
+        <span className="text-slate-400">Tanggal</span>
+        <span className="text-slate-200">{orderStatusDetails.date}</span>
+        </div>
+        <div className="flex justify-between">
+        <span className="text-slate-400">Kasir</span>
+        <span className="text-slate-200">{orderStatusDetails.cashierName}</span>
+        </div>
+        <div className="flex justify-between">
+        <span className="text-slate-400">Pelanggan</span>
+        <span className="text-slate-200">{orderStatusDetails.customerName}</span>
+        </div>
+        <div className="flex justify-between">
+        <span className="text-slate-400">Metode Bayar</span>
+        <span className="text-slate-200 font-medium">{orderStatusDetails.paymentMethod}</span>
+        </div>
+        </div>
+
+        <div className="border-t border-slate-800 pt-3">
+        <p className="text-xs font-medium text-slate-400 mb-2 uppercase tracking-wider">
+        Detail Item
+        </p>
+        <div className="space-y-2 max-h-40 overflow-y-auto">
+        {orderStatusDetails.items.map((item: any, idx: number) => (
+          <div key={idx} className="flex justify-between text-sm">
+          <span className="text-slate-300">
+          {item.quantity}x {item.menu.name}
+          </span>
+          <span className="text-slate-200">
+          {formatCurrency(item.total ?? item.menu.price * item.quantity)}
+          </span>
+          </div>
+        ))}
+        </div>
+        </div>
+
+        <div className="border-t border-slate-800 pt-3 space-y-1">
+        <div className="flex justify-between text-sm text-slate-400">
+        <span>Subtotal</span>
+        <span>{formatCurrency(orderStatusDetails.subtotal)}</span>
+        </div>
+        <div className="flex justify-between text-sm text-slate-400">
+        <span>Pajak</span>
+        <span>{formatCurrency(orderStatusDetails.tax)}</span>
+        </div>
+        <div className="flex justify-between items-center pt-1">
+        <span className="font-semibold text-slate-200">Total Bayar</span>
+        <span className="font-bold text-xl text-orange-400">
+        {formatCurrency(orderStatusDetails.total)}
+        </span>
+        </div>
+        </div>
+
+        <div className="flex gap-3 mt-4">
+        <Button
+        className="flex-1 bg-orange-500 hover:bg-orange-600 text-white gap-2"
+        onClick={() => handlePrintOrderReceipt(orderStatusDetails)}
+        >
+        <Printer size={16} />
+        Print Struk
+        </Button>
+        <Button
+        className="flex-1 bg-slate-800 hover:bg-slate-700 text-white"
+        onClick={() => setOrderStatusDialogOpen(false)}
+        >
+        Tutup
+        </Button>
+        </div>
+        </div>
       )}
       </DialogContent>
       </Dialog>
