@@ -940,7 +940,7 @@ export default function PosPage() {
       <Wallet size={16} className="text-green-500" />
       <div className="text-xs">
       <p className="text-green-500 font-semibold">Register Open</p>
-      <p className="text-slate-400">Bal: {formatCurrency(registerSession.current_balance || 0)}</p>
+      {/* <p className="text-slate-400">Bal: {formatCurrency(registerSession.current_balance || 0)}</p> */}
       </div>
       <Button
       size="sm"
