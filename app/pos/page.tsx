@@ -531,9 +531,6 @@ export default function PosPage() {
     if (!pb || !registerSession) return;
     try {
       setBreakdownLoading(true);
-      const res = await pb.collection('payments').getList<Payment>(1, 500, {
-        filter: `session_id = "${registerSession.id}"`,
-      });
       const methodLabels: Record<string, string> = {
         cash: 'Cash',
         qris: 'QRIS',
@@ -542,10 +539,30 @@ export default function PosPage() {
         cheque: 'Cek',
       };
       const grouped: Record<string, number> = {};
+
+      // Fetch payments yang punya session_id (cash, transfer, dll)
+      const res = await pb.collection('payments').getList<Payment>(1, 500, {
+        filter: `session_id = "${registerSession.id}"`,
+      });
       for (const p of res.items) {
         const m = p.method || 'other';
         grouped[m] = (grouped[m] || 0) + (p.amount || 0);
       }
+
+      // Fetch QRIS orders dalam rentang waktu session (webhook tidak menyimpan session_id)
+      const openTime = registerSession.open_time;
+      if (openTime) {
+        try {
+          const qrisRes = await pb.collection('orders').getList(1, 500, {
+            filter: `payment_type = "qris" && status = "completed" && order_date >= "${openTime}"`,
+          });
+          const qrisTotal = qrisRes.items.reduce((sum: number, o: any) => sum + (o.total || 0), 0);
+          if (qrisTotal > 0) {
+            grouped['qris'] = (grouped['qris'] || 0) + qrisTotal;
+          }
+        } catch (_) {}
+      }
+
       const breakdown = Object.entries(grouped).map(([method, total]) => ({
         method,
         label: methodLabels[method] || method,
@@ -1462,9 +1479,16 @@ export default function PosPage() {
         <div className="bg-slate-800/40 border border-slate-700 rounded-lg p-3 space-y-2">
         <p className="text-xs font-medium text-slate-400 uppercase tracking-wider mb-2">Breakdown Pendapatan</p>
         {paymentBreakdown.map((b) => (
-          <div key={b.method} className="flex justify-between text-sm">
-          <span className="text-slate-300">{b.label}</span>
-          <span className="text-slate-100 font-medium">{formatCurrency(b.total)}</span>
+          <div key={b.method} className="flex justify-between text-sm items-center">
+          <span className="text-slate-300 flex items-center gap-1.5">
+          {b.label}
+          {b.method === 'qris' && (
+            <span className="text-xs bg-blue-500/20 text-blue-400 border border-blue-500/30 px-1.5 py-0.5 rounded">info</span>
+          )}
+          </span>
+          <span className={`font-medium ${b.method === 'qris' ? 'text-blue-400' : 'text-slate-100'}`}>
+          {formatCurrency(b.total)}
+          </span>
           </div>
         ))}
         <div className="border-t border-slate-700 pt-2 flex justify-between text-sm font-bold">
@@ -1473,6 +1497,9 @@ export default function PosPage() {
         {formatCurrency(paymentBreakdown.reduce((s, b) => s + b.total, 0))}
         </span>
         </div>
+        {paymentBreakdown.some(b => b.method === 'qris') && (
+          <p className="text-xs text-slate-500 pt-1">* QRIS masuk rekening, tidak dihitung dalam Expected Cash.</p>
+        )}
         </div>
       )}
       {!breakdownLoading && paymentBreakdown.length === 0 && (

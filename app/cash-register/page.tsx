@@ -162,6 +162,20 @@ export default function CashRegisterPage() {
         const m = p.method || 'other';
         grouped[m] = (grouped[m] || 0) + (p.amount || 0);
       }
+
+      // Fetch QRIS orders dalam rentang waktu session (webhook tidak menyimpan session_id)
+      if (session.open_time) {
+        try {
+          const qrisRes = await pb.collection('orders').getList(1, 500, {
+            filter: `payment_type = "qris" && status = "completed" && order_date >= "${session.open_time}"`,
+          });
+          const qrisTotal = qrisRes.items.reduce((sum: number, o: any) => sum + (o.total || 0), 0);
+          if (qrisTotal > 0) {
+            grouped['qris'] = (grouped['qris'] || 0) + qrisTotal;
+          }
+        } catch (_) {}
+      }
+
       const breakdown = Object.entries(grouped).map(([method, total]) => ({
         method,
         label: methodLabels[method] || method,
@@ -527,9 +541,16 @@ export default function CashRegisterPage() {
       <div className="bg-slate-800/40 border border-slate-700 rounded-lg p-3 space-y-2">
       <p className="text-xs font-medium text-slate-400 uppercase tracking-wider mb-2">Breakdown Pendapatan</p>
       {paymentBreakdown.map((b) => (
-        <div key={b.method} className="flex justify-between text-sm">
-        <span className="text-slate-300">{b.label}</span>
-        <span className="text-slate-100 font-medium">{formatCurrency(b.total)}</span>
+        <div key={b.method} className="flex justify-between text-sm items-center">
+        <span className="text-slate-300 flex items-center gap-1.5">
+        {b.label}
+        {b.method === 'qris' && (
+          <span className="text-xs bg-blue-500/20 text-blue-400 border border-blue-500/30 px-1.5 py-0.5 rounded">info</span>
+        )}
+        </span>
+        <span className={`font-medium ${b.method === 'qris' ? 'text-blue-400' : 'text-slate-100'}`}>
+        {formatCurrency(b.total)}
+        </span>
         </div>
       ))}
       <div className="border-t border-slate-700 pt-2 flex justify-between text-sm font-bold">
@@ -538,6 +559,9 @@ export default function CashRegisterPage() {
       {formatCurrency(paymentBreakdown.reduce((s, b) => s + b.total, 0))}
       </span>
       </div>
+      {paymentBreakdown.some(b => b.method === 'qris') && (
+        <p className="text-xs text-slate-500 pt-1">* QRIS masuk rekening, tidak dihitung dalam Expected Cash.</p>
+      )}
       </div>
     )}
     {!expectedLoading && paymentBreakdown.length === 0 && (
